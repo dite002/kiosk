@@ -22,9 +22,68 @@ namespace SikawanLagustaKiosk
         [STAThread]
         static void Main()
         {
+            // Auto Extract & Load SQLite Interop DLL (Native C++) & Managed Assembly
+            EnsureSQLiteLibraries();
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new KioskForm());
+        }
+
+        private static void EnsureSQLiteLibraries()
+        {
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string x64Dir = Path.Combine(baseDir, "x64");
+                string x86Dir = Path.Combine(baseDir, "x86");
+
+                Directory.CreateDirectory(x64Dir);
+                Directory.CreateDirectory(x86Dir);
+
+                // Ekstrak SQLite.Interop.dll ke folder x64 dan x86 jika belum ada
+                ExtractResourceToFile("SQLite.Interop.dll", Path.Combine(x64Dir, "SQLite.Interop.dll"));
+                ExtractResourceToFile("SQLite.Interop.dll", Path.Combine(x86Dir, "SQLite.Interop.dll"));
+                ExtractResourceToFile("SQLite.Interop.dll", Path.Combine(baseDir, "SQLite.Interop.dll"));
+                ExtractResourceToFile("System.Data.SQLite.dll", Path.Combine(baseDir, "System.Data.SQLite.dll"));
+
+                // Dynamic Assembly Resolve untuk System.Data.SQLite
+                AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+                {
+                    string asmName = new System.Reflection.AssemblyName(args.Name).Name;
+                    if (asmName.Equals("System.Data.SQLite", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string localDll = Path.Combine(baseDir, "System.Data.SQLite.dll");
+                        if (File.Exists(localDll))
+                        {
+                            return System.Reflection.Assembly.LoadFrom(localDll);
+                        }
+                    }
+                    return null;
+                };
+            }
+            catch { }
+        }
+
+        private static void ExtractResourceToFile(string resourceName, string targetPath)
+        {
+            if (File.Exists(targetPath)) return;
+
+            try
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream != null)
+                    {
+                        using (FileStream fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
+                        {
+                            stream.CopyTo(fs);
+                        }
+                    }
+                }
+            }
+            catch { }
         }
     }
 
