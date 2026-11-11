@@ -496,12 +496,14 @@ Volume=1000";
 
         private void LoadLastCalledByCounter(SQLiteConnection conn, int counterNo, Label lblNum, Label lblCnt)
         {
-            // Ambil tiket TERAKHIR yang dipanggil di Loket spesifik ini pada hari ini
-            string sql = @"SELECT prefix, number, counter_number FROM tickets 
-                           WHERE counter_number = @counterNo AND status = 'called' 
-                             AND date(created_at) = date('now', 'localtime')
-                           ORDER BY datetime(created_at) DESC, number DESC LIMIT 1";
-            using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
+            string defaultPrefix = (counterNo == 1) ? "A" : "B";
+
+            // Hanya ambil antrean yang STATUSNYA 'called' (SUDAH DIPANGGIL LOKET) hari ini
+            string sqlCalled = @"SELECT prefix, number, counter_number FROM tickets 
+                                 WHERE counter_number = @counterNo AND status = 'called' 
+                                   AND date(created_at) = date('now', 'localtime')
+                                 ORDER BY datetime(created_at) DESC, number DESC LIMIT 1";
+            using (SQLiteCommand cmd = new SQLiteCommand(sqlCalled, conn))
             {
                 cmd.Parameters.AddWithValue("@counterNo", counterNo);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
@@ -513,8 +515,8 @@ Volume=1000";
                     }
                     else
                     {
-                        // Fallback jika belum ada panggilan di loket ini hari ini
-                        lblNum.Text = (counterNo == 1 ? "A" : "B") + "000";
+                        // Jika BELUM ADA yang dipanggil oleh petugas loket hari ini, tetap tampilkan A000 / B000
+                        lblNum.Text = defaultPrefix + "000";
                         lblCnt.Text = "LOKET " + counterNo;
                     }
                 }
