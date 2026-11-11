@@ -29,239 +29,188 @@ namespace SikawanLagustaDisplay
     }
 
     // =========================================================================
-    // CONFIG HELPER
+    // HELPER UNTUK MEMBACA CONFIG/INI & DISCOVERY SERVER AUTOMATIS
     // =========================================================================
     public static class ConfigHelper
     {
-        private static readonly string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");
+        private static readonly string iniPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "kiosk.ini");
 
-        public static string GetValue(string section, string key, string defaultValue = "")
+        public static string GetValue(string section, string key, string defaultValue)
         {
-            if (!File.Exists(configPath)) return defaultValue;
-            string currentSection = "";
-            foreach (string line in File.ReadAllLines(configPath))
+            if (!File.Exists(iniPath)) return defaultValue;
+
+            try
             {
-                string trimmed = line.Trim();
-                if (trimmed.StartsWith(";") || trimmed.StartsWith("#") || string.IsNullOrEmpty(trimmed)) continue;
-                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                string[] lines = File.ReadAllLines(iniPath);
+                string currentSection = "";
+
+                foreach (string line in lines)
                 {
-                    currentSection = trimmed.Substring(1, trimmed.Length - 2);
-                    continue;
-                }
-                if (currentSection.Equals(section, StringComparison.OrdinalIgnoreCase))
-                {
-                    int eqIndex = trimmed.IndexOf('=');
-                    if (eqIndex > 0)
+                    string trimmed = line.Trim();
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
                     {
-                        string k = trimmed.Substring(0, eqIndex).Trim();
-                        string v = trimmed.Substring(eqIndex + 1).Trim();
-                        if (k.Equals(key, StringComparison.OrdinalIgnoreCase))
-                            return v;
+                        currentSection = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                    }
+                    else if (!trimmed.StartsWith(";") && !trimmed.StartsWith("#") && trimmed.Contains("="))
+                    {
+                        string[] parts = trimmed.Split(new char[] { '=' }, 2);
+                        if (currentSection.Equals(section, StringComparison.OrdinalIgnoreCase) &&
+                            parts[0].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return parts[1].Trim();
+                        }
                     }
                 }
             }
+            catch { }
             return defaultValue;
         }
 
         public static void SetValue(string section, string key, string value)
         {
-            List<string> lines = new List<string>();
-            if (File.Exists(configPath))
-                lines = new List<string>(File.ReadAllLines(configPath));
-            string currentSection = "";
-            bool found = false;
-            for (int i = 0; i < lines.Count; i++)
+            try
             {
-                string trimmed = lines[i].Trim();
-                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                List<string> lines = File.Exists(iniPath) ? File.ReadAllLines(iniPath).ToList() : new List<string>();
+                int sectionIdx = -1;
+                int keyIdx = -1;
+
+                for (int i = 0; i < lines.Count; i++)
                 {
-                    currentSection = trimmed.Substring(1, trimmed.Length - 2);
-                    continue;
-                }
-                if (currentSection.Equals(section, StringComparison.OrdinalIgnoreCase))
-                {
-                    int eqIndex = trimmed.IndexOf('=');
-                    if (eqIndex > 0)
+                    string trimmed = lines[i].Trim();
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
                     {
-                        string k = trimmed.Substring(0, eqIndex).Trim();
-                        if (k.Equals(key, StringComparison.OrdinalIgnoreCase))
+                        string secName = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                        if (secName.Equals(section, StringComparison.OrdinalIgnoreCase))
                         {
-                            lines[i] = key + "=" + value;
-                            found = true;
+                            sectionIdx = i;
+                        }
+                    }
+                    else if (sectionIdx != -1 && !trimmed.StartsWith("[") && trimmed.Contains("="))
+                    {
+                        string[] parts = trimmed.Split(new char[] { '=' }, 2);
+                        if (parts[0].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                        {
+                            keyIdx = i;
                             break;
                         }
                     }
                 }
-            }
-            if (!found)
-            {
-                bool sectionFound = false;
-                int insertIndex = lines.Count;
-                for (int i = 0; i < lines.Count; i++)
+
+                if (keyIdx != -1)
                 {
-                    if (lines[i].Trim() == "[" + section + "]")
-                    {
-                        sectionFound = true;
-                        insertIndex = i + 1;
-                        for (int j = i + 1; j < lines.Count; j++)
-                        {
-                            if (lines[j].Trim().StartsWith("[")) { insertIndex = j; break; }
-                            insertIndex = j + 1;
-                        }
-                        break;
-                    }
+                    lines[keyIdx] = key + "=" + value;
                 }
-                if (!sectionFound) { lines.Add(""); lines.Add("[" + section + "]"); insertIndex = lines.Count; }
-                lines.Insert(insertIndex, key + "=" + value);
+                else if (sectionIdx != -1)
+                {
+                    lines.Insert(sectionIdx + 1, key + "=" + value);
+                }
+                else
+                {
+                    lines.Add("[" + section + "]");
+                    lines.Add(key + "=" + value);
+                }
+
+                File.WriteAllLines(iniPath, lines.ToArray());
             }
-            File.WriteAllLines(configPath, lines.ToArray());
+            catch { }
         }
 
-        public static string ScanForServer(int port = 3000, int timeoutMs = 200)
-        {
-            string baseIp = GetValue("Network", "BaseIP", "");
-            if (string.IsNullOrEmpty(baseIp)) baseIp = DetectBaseIP();
-            if (string.IsNullOrEmpty(baseIp)) return "";
-            for (int i = 1; i <= 255; i++)
-            {
-                string testIp = baseIp + "." + i;
-                try
-                {
-                    using (TcpClient client = new TcpClient())
-                    {
-                        IAsyncResult result = client.BeginConnect(testIp, port, null, null);
-                        if (result.AsyncWaitHandle.WaitOne(timeoutMs) && client.Connected)
-                        {
-                            client.EndConnect(result);
-                            return testIp;
-                        }
-                    }
-                }
-                catch { }
-            }
-            return "";
-        }
-
-        public static string DetectBaseIP()
+        public static string ScanForServer()
         {
             try
             {
-                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                string localIp = GetLocalIPAddress();
+                if (string.IsNullOrEmpty(localIp)) return null;
+
+                string subnet = localIp.Substring(0, localIp.LastIndexOf('.') + 1);
+
+                for (int i = 1; i < 255; i++)
                 {
-                    if (ni.OperationalStatus != OperationalStatus.Up) continue;
-                    if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
-                    foreach (UnicastIPAddressInformation addr in ni.GetIPProperties().UnicastAddresses)
+                    string targetIp = subnet + i;
+                    try
                     {
-                        if (addr.Address.AddressFamily == AddressFamily.InterNetwork)
+                        using (TcpClient client = new TcpClient())
                         {
-                            string[] p = addr.Address.ToString().Split('.');
-                            if (p.Length == 4) return p[0] + "." + p[1] + "." + p[2];
+                            IAsyncResult result = client.BeginConnect(targetIp, 3000, null, null);
+                            bool success = result.AsyncWaitHandle.WaitOne(40, false);
+                            if (success && client.Connected)
+                            {
+                                return targetIp;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static string GetLocalIPAddress()
+        {
+            try
+            {
+                foreach (var netInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (netInterface.OperationalStatus == OperationalStatus.Up &&
+                        netInterface.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                    {
+                        var ipProps = netInterface.GetIPProperties();
+                        foreach (var addr in ipProps.UnicastAddresses)
+                        {
+                            if (addr.Address.AddressFamily == AddressFamily.InterNetwork)
+                            {
+                                string ip = addr.Address.ToString();
+                                if (!ip.StartsWith("169.254")) return ip;
+                            }
                         }
                     }
                 }
             }
             catch { }
-            return "";
+            return "127.0.0.1";
         }
     }
 
     // =========================================================================
-    // MP3 PLAYER - Menggunakan Windows Media Player COM (late-binding)
-    // Dijamin work di background thread, tidak butuh message pump.
+    // MP3 PLAYER - Menggunakan Direct WinMM MCI Isolated Session
+    // (Bebas dari konflik WMP Video Player)
     // =========================================================================
     public static class Mp3Player
     {
-        /// <summary>
-        /// Play file MP3 secara blocking (tunggu sampai selesai).
-        /// Menggunakan WMP COM object via late-binding reflection.
-        /// </summary>
+        [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+        private static extern long mciSendString(string command, StringBuilder returnValue, int returnLength, IntPtr winHandle);
+
+        private static int aliasId = 0;
+
         public static void PlayFileBlocking(string filePath)
         {
             if (!File.Exists(filePath)) return;
 
-            object wmpPlayer = null;
+            string alias = "snd_" + Interlocked.Increment(ref aliasId);
             try
             {
-                // Buat instance Windows Media Player COM: WMPlayer.OCX
-                Type wmpType = Type.GetTypeFromProgID("WMPlayer.OCX");
-                if (wmpType == null) return;
+                // Tutup alias jika ada sisa
+                mciSendString(string.Format("close {0}", alias), null, 0, IntPtr.Zero);
 
-                wmpPlayer = Activator.CreateInstance(wmpType);
-                if (wmpPlayer == null) return;
+                // Buka file MP3 dengan MPEGVideo Engine khusus
+                string openCmd = string.Format("open \"{0}\" type mpegvideo alias {0}", filePath, alias);
+                long resOpen = mciSendString(string.Format("open \"{0}\" type mpegvideo alias {1}", filePath, alias), null, 0, IntPtr.Zero);
 
-                // settings.autoStart = false (kita kontrol sendiri)
-                object settings = wmpPlayer.GetType().InvokeMember("settings",
-                    System.Reflection.BindingFlags.GetProperty, null, wmpPlayer, null);
-                settings.GetType().InvokeMember("autoStart",
-                    System.Reflection.BindingFlags.SetProperty, null, settings, new object[] { false });
-
-                // Set volume (0-100 untuk WMP COM)
-                string volStr = ConfigHelper.GetValue("Audio", "Volume", "1000");
-                int volConfig = 100;
-                int parsed;
-                if (int.TryParse(volStr, out parsed))
+                if (resOpen == 0)
                 {
-                    volConfig = Math.Min(100, Math.Max(0, parsed / 10)); // 0-1000 -> 0-100
-                }
-                settings.GetType().InvokeMember("volume",
-                    System.Reflection.BindingFlags.SetProperty, null, settings, new object[] { volConfig });
+                    // Set volume maksimal untuk channel ini (0 - 1000)
+                    mciSendString(string.Format("setaudio {0} volume to 1000", alias), null, 0, IntPtr.Zero);
 
-                // Set URL (load file)
-                wmpPlayer.GetType().InvokeMember("URL",
-                    System.Reflection.BindingFlags.SetProperty, null, wmpPlayer, new object[] { filePath });
-
-                // Tunggu sampai media siap (status berubah dari 0/idle)
-                // playState: 0=Undefined, 1=Stopped, 2=Paused, 3=Playing, 6=Buffering, 9=Connecting, 10=Ready
-                Thread.Sleep(100); // Beri waktu load
-
-                // Controls.play()
-                object controls = wmpPlayer.GetType().InvokeMember("controls",
-                    System.Reflection.BindingFlags.GetProperty, null, wmpPlayer, null);
-                controls.GetType().InvokeMember("play",
-                    System.Reflection.BindingFlags.InvokeMethod, null, controls, null);
-
-                // Polling playState sampai selesai (1=Stopped berarti selesai)
-                int maxWait = 15000; // 15 detik timeout
-                int elapsed = 0;
-                bool hasStartedPlaying = false;
-
-                while (elapsed < maxWait)
-                {
-                    Thread.Sleep(50);
-                    elapsed += 50;
-
-                    try
-                    {
-                        object stateObj = wmpPlayer.GetType().InvokeMember("playState",
-                            System.Reflection.BindingFlags.GetProperty, null, wmpPlayer, null);
-                        int state = Convert.ToInt32(stateObj);
-
-                        if (state == 3) // Playing
-                        {
-                            hasStartedPlaying = true;
-                        }
-                        else if (hasStartedPlaying && (state == 1 || state == 0)) // Stopped atau Undefined setelah playing
-                        {
-                            break;
-                        }
-                    }
-                    catch { break; }
+                    // Play dan tunggu hingga selesai secara synchronous (blocking thread pemanggil suara)
+                    mciSendString(string.Format("play {0} wait", alias), null, 0, IntPtr.Zero);
                 }
             }
             catch { }
             finally
             {
-                // Cleanup: close WMP COM object
-                if (wmpPlayer != null)
-                {
-                    try
-                    {
-                        wmpPlayer.GetType().InvokeMember("close",
-                            System.Reflection.BindingFlags.InvokeMethod, null, wmpPlayer, null);
-                    }
-                    catch { }
-                    try { Marshal.ReleaseComObject(wmpPlayer); } catch { }
-                }
+                // Selalu bersihkan alias MCI agar RAM & Audio Channel rilis kembali
+                mciSendString(string.Format("close {0}", alias), null, 0, IntPtr.Zero);
             }
         }
     }
@@ -277,31 +226,33 @@ namespace SikawanLagustaDisplay
 
         private Label lblClock;
         private Label lblDate;
+
         private Label lblKunjunganNumber;
         private Label lblKunjunganCounter;
+
         private Label lblPenitipanNumber;
         private Label lblPenitipanCounter;
+
         private Label lblServerStatus;
         private Timer timerClock;
+
         private Panel videoPanelHost;
 
-        // Socket Client
         private TcpClient tcpClient;
         private NetworkStream networkStream;
         private Thread listenThread;
         private string serverIp;
 
-        // Audio queue
         private readonly Queue<string[]> audioQueue = new Queue<string[]>();
         private bool isPlayingAudio = false;
         private readonly object audioLock = new object();
 
-        // TCP buffer
         private string tcpMessageBuffer = "";
 
         public DisplayForm()
         {
             serverIp = ConfigHelper.GetValue("Server", "ServerIP", "127.0.0.1");
+
             InitializeSettings();
             BuildUI();
             LoadLastQueueFromDatabase();
@@ -330,6 +281,7 @@ namespace SikawanLagustaDisplay
         private void LoadLastQueueFromDatabase()
         {
             if (!File.Exists(dbPath)) return;
+
             try
             {
                 using (SQLiteConnection conn = new SQLiteConnection(connectionString))
@@ -424,14 +376,15 @@ namespace SikawanLagustaDisplay
 
             videoPanelHost = new Panel { Dock = DockStyle.Top, Height = (int)(leftPanel.Height * 0.72), BackColor = Color.FromArgb(30, 40, 60) };
             leftPanel.Controls.Add(videoPanelHost);
+
             InitializeVideoPlayer();
 
             Panel infoBox = new Panel { Dock = DockStyle.Bottom, Height = leftPanel.Height - videoPanelHost.Height - 15, BackColor = Color.FromArgb(19, 24, 38) };
             leftPanel.Controls.Add(infoBox);
+
             infoBox.Controls.Add(new Label { Text = "INFORMASI", Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 ForeColor = Color.FromArgb(245, 185, 40), TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Top, Height = 30 });
-            infoBox.Controls.Add(new Label
-            {
+            infoBox.Controls.Add(new Label {
                 Text = "• Harap tetap tenang dan tertib saat menunggu antrean\n• Perhatikan nomor antrean yang tampil pada layar\n• Nomor antrean akan dipanggil melalui pengeras suara",
                 Font = new Font("Segoe UI", 11), ForeColor = Color.White, Padding = new Padding(20, 10, 20, 10), Dock = DockStyle.Fill
             });
@@ -455,12 +408,13 @@ namespace SikawanLagustaDisplay
         {
             string videoPath = ConfigHelper.GetValue("Display", "VideoPath", @"video\video.mp4");
             if (!Path.IsPathRooted(videoPath))
+            {
                 videoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, videoPath);
+            }
 
             if (!File.Exists(videoPath))
             {
-                videoPanelHost.Controls.Add(new Label
-                {
+                videoPanelHost.Controls.Add(new Label {
                     Text = "Sapa Kasih Kalapas I Medan", Font = new Font("Segoe UI", 18, FontStyle.Bold),
                     ForeColor = Color.FromArgb(245, 185, 40), BackColor = Color.FromArgb(25, 45, 85),
                     TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill
@@ -473,12 +427,12 @@ namespace SikawanLagustaDisplay
                 var wmp = new WMPVideoPanel();
                 wmp.Dock = DockStyle.Fill;
                 videoPanelHost.Controls.Add(wmp);
+
                 this.Load += (s, e) => { try { wmp.SetVideo(videoPath, true); } catch { } };
             }
             catch
             {
-                videoPanelHost.Controls.Add(new Label
-                {
+                videoPanelHost.Controls.Add(new Label {
                     Text = "Sapa Kasih Kalapas I Medan", Font = new Font("Segoe UI", 18, FontStyle.Bold),
                     ForeColor = Color.FromArgb(245, 185, 40), BackColor = Color.FromArgb(25, 45, 85),
                     TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill
@@ -499,7 +453,6 @@ namespace SikawanLagustaDisplay
                     Color.FromArgb(200, 210, 225), 2, ButtonBorderStyle.Solid);
             };
 
-            // Z-order: Fill first, then Bottom, then Top (last added = processed first for docking)
             Label lblNum = new Label { Text = defNum, Font = new Font("Segoe UI", 56, FontStyle.Bold),
                 ForeColor = Color.FromArgb(20, 25, 35), TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
             card.Controls.Add(lblNum);
@@ -507,6 +460,7 @@ namespace SikawanLagustaDisplay
 
             Panel pnlCounter = new Panel { Dock = DockStyle.Bottom, Height = 55, BackColor = Color.White };
             card.Controls.Add(pnlCounter);
+
             Label lblCnt = new Label { Text = defCounter, Font = new Font("Segoe UI", 18, FontStyle.Bold),
                 ForeColor = Color.White, BackColor = Color.FromArgb(25, 35, 55),
                 TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
@@ -521,9 +475,6 @@ namespace SikawanLagustaDisplay
             return card;
         }
 
-        // =====================================================================
-        // SOCKET CONNECTION
-        // =====================================================================
         private void ConnectToSocketServer()
         {
             Thread connectThread = new Thread(() =>
@@ -535,6 +486,7 @@ namespace SikawanLagustaDisplay
                     string found = ConfigHelper.ScanForServer();
                     if (!string.IsNullOrEmpty(found)) { serverIp = found; ConfigHelper.SetValue("Server", "ServerIP", found); }
                 }
+
                 while (true)
                 {
                     try
@@ -544,6 +496,7 @@ namespace SikawanLagustaDisplay
                             tcpClient = new TcpClient();
                             tcpClient.Connect(serverIp, 3000);
                             networkStream = tcpClient.GetStream();
+
                             try { this.Invoke((MethodInvoker)delegate { lblServerStatus.Text = "Server: " + serverIp + ":3000 (Connected)"; lblServerStatus.ForeColor = Color.FromArgb(80, 200, 120); }); } catch { }
                             tcpMessageBuffer = "";
                             listenThread = new Thread(ListenSocketMessages) { IsBackground = true };
@@ -569,7 +522,9 @@ namespace SikawanLagustaDisplay
                 {
                     int bytesRead = networkStream.Read(buffer, 0, buffer.Length);
                     if (bytesRead == 0) break;
-                    tcpMessageBuffer += Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+                    string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    tcpMessageBuffer += data;
 
                     while (tcpMessageBuffer.Contains("\n"))
                     {
@@ -579,7 +534,6 @@ namespace SikawanLagustaDisplay
                         if (!string.IsNullOrEmpty(msg)) ProcessMessage(msg);
                     }
 
-                    // Fallback tanpa newline
                     if (!string.IsNullOrEmpty(tcpMessageBuffer) && tcpMessageBuffer.Contains("|"))
                     {
                         string[] tp = tcpMessageBuffer.Split('|');
@@ -654,33 +608,43 @@ namespace SikawanLagustaDisplay
             ft.Start();
         }
 
-        // =====================================================================
-        // AUDIO - menggunakan WMP COM (Mp3Player class)
-        // =====================================================================
         private void EnqueueVoiceAnnouncement(string prefix, int number, int counterNo)
+        {
+            string[] audioFiles = BuildAudioFileList(prefix, number, counterNo);
+
+            lock (audioLock)
+            {
+                audioQueue.Enqueue(audioFiles);
+                if (!isPlayingAudio)
+                {
+                    isPlayingAudio = true;
+                    Thread audioThread = new Thread(ProcessAudioQueue) { IsBackground = true };
+                    audioThread.SetApartmentState(ApartmentState.STA);
+                    audioThread.Start();
+                }
+            }
+        }
+
+        private string[] BuildAudioFileList(string prefix, int number, int counterNo)
         {
             List<string> files = new List<string>();
             files.Add("nomor.mp3");
             files.Add("antrian.mp3");
             files.Add(prefix.ToLower() + ".mp3");
-            foreach (char d in number.ToString("D3")) files.Add(d + ".mp3");
+
+            string numberFormatted = number.ToString("D3");
+            foreach (char digit in numberFormatted)
+            {
+                files.Add(digit + ".mp3");
+            }
+
             files.Add("silakan.mp3");
             files.Add("menuju.mp3");
             files.Add("ke.mp3");
             files.Add("loket.mp3");
             files.Add(counterNo.ToString() + ".mp3");
 
-            lock (audioLock)
-            {
-                audioQueue.Enqueue(files.ToArray());
-                if (!isPlayingAudio)
-                {
-                    isPlayingAudio = true;
-                    Thread t = new Thread(ProcessAudioQueue) { IsBackground = true };
-                    t.SetApartmentState(ApartmentState.STA); // COM membutuhkan STA
-                    t.Start();
-                }
-            }
+            return files.ToArray();
         }
 
         private void ProcessAudioQueue()
@@ -690,7 +654,11 @@ namespace SikawanLagustaDisplay
                 string[] filesToPlay;
                 lock (audioLock)
                 {
-                    if (audioQueue.Count == 0) { isPlayingAudio = false; return; }
+                    if (audioQueue.Count == 0)
+                    {
+                        isPlayingAudio = false;
+                        return;
+                    }
                     filesToPlay = audioQueue.Dequeue();
                 }
 
@@ -719,6 +687,7 @@ namespace SikawanLagustaDisplay
         {
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+
             using (Pen p = new Pen(Color.FromArgb(245, 185, 40), 2)) { g.DrawEllipse(p, 2, 2, 55, 55); }
             using (SolidBrush b = new SolidBrush(Color.FromArgb(245, 185, 40))) { g.FillEllipse(b, 8, 8, 43, 43); }
         }
@@ -746,17 +715,21 @@ namespace SikawanLagustaDisplay
         public void SetVideo(string filePath, bool mute)
         {
             if (wmpObject == null) return;
+
             try
             {
                 Type t = wmpObject.GetType();
+
                 object settings = t.InvokeMember("settings", System.Reflection.BindingFlags.GetProperty, null, wmpObject, null);
                 settings.GetType().InvokeMember("autoStart", System.Reflection.BindingFlags.SetProperty, null, settings, new object[] { true });
                 settings.GetType().InvokeMember("setMode", System.Reflection.BindingFlags.InvokeMethod, null, settings, new object[] { "loop", true });
+
                 if (mute)
                 {
                     settings.GetType().InvokeMember("mute", System.Reflection.BindingFlags.SetProperty, null, settings, new object[] { true });
                     settings.GetType().InvokeMember("volume", System.Reflection.BindingFlags.SetProperty, null, settings, new object[] { 0 });
                 }
+
                 t.InvokeMember("uiMode", System.Reflection.BindingFlags.SetProperty, null, wmpObject, new object[] { "none" });
                 t.InvokeMember("stretchToFit", System.Reflection.BindingFlags.SetProperty, null, wmpObject, new object[] { true });
                 t.InvokeMember("URL", System.Reflection.BindingFlags.SetProperty, null, wmpObject, new object[] { filePath });
