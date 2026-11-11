@@ -786,24 +786,7 @@ Volume=1000";
 
                 EnqueueVoiceAnnouncement(prefix, number, counterNo);
             }
-            else if (parts.Length >= 4 && parts[0] == "SYNC")
-            {
-                string category = parts[1].Trim();
-                string prefix = parts[2].Trim();
-                int lastNum = Convert.ToInt32(parts[3].Trim());
-                string formatted = prefix + lastNum.ToString("D3");
-                try
-                {
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        if (category.Equals("kunjungan", StringComparison.OrdinalIgnoreCase))
-                            lblKunjunganNumber.Text = formatted;
-                        else
-                            lblPenitipanNumber.Text = formatted;
-                    });
-                }
-                catch { }
-            }
+            // Hapus / Abaikan blok SYNC agar pendaftaran tiket baru di Kiosk TIDAK merubah angka di Display Monitor secara otomatis!
         }
 
         private void FlashCard(Label lbl)
