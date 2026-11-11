@@ -487,28 +487,35 @@ Volume=1000";
                 using (SQLiteConnection conn = new SQLiteConnection(connectionString))
                 {
                     conn.Open();
-                    LoadLastCalled(conn, "kunjungan", lblKunjunganNumber, lblKunjunganCounter);
-                    LoadLastCalled(conn, "penitipan", lblPenitipanNumber, lblPenitipanCounter);
+                    LoadLastCalledByCounter(conn, 1, lblKunjunganNumber, lblKunjunganCounter);
+                    LoadLastCalledByCounter(conn, 2, lblPenitipanNumber, lblPenitipanCounter);
                 }
             }
             catch { }
         }
 
-        private void LoadLastCalled(SQLiteConnection conn, string category, Label lblNum, Label lblCnt)
+        private void LoadLastCalledByCounter(SQLiteConnection conn, int counterNo, Label lblNum, Label lblCnt)
         {
+            // Ambil tiket TERAKHIR yang dipanggil di Loket spesifik ini pada hari ini
             string sql = @"SELECT prefix, number, counter_number FROM tickets 
-                           WHERE category = @cat AND status = 'called' AND date(created_at) = date('now', 'localtime')
-                           ORDER BY number DESC LIMIT 1";
+                           WHERE counter_number = @counterNo AND status = 'called' 
+                             AND date(created_at) = date('now', 'localtime')
+                           ORDER BY datetime(created_at) DESC, number DESC LIMIT 1";
             using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
             {
-                cmd.Parameters.AddWithValue("@cat", category);
+                cmd.Parameters.AddWithValue("@counterNo", counterNo);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
                     if (reader.Read())
                     {
                         lblNum.Text = reader["prefix"].ToString() + Convert.ToInt32(reader["number"]).ToString("D3");
-                        object cn = reader["counter_number"];
-                        if (cn != null && cn != DBNull.Value) lblCnt.Text = "LOKET " + cn.ToString();
+                        lblCnt.Text = "LOKET " + counterNo;
+                    }
+                    else
+                    {
+                        // Fallback jika belum ada panggilan di loket ini hari ini
+                        lblNum.Text = (counterNo == 1 ? "A" : "B") + "000";
+                        lblCnt.Text = "LOKET " + counterNo;
                     }
                 }
             }
