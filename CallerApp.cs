@@ -43,8 +43,26 @@ namespace SikawanLagustaCaller
         {
             InitializeForm();
             BuildUI();
-            ConnectToServer();
-            StartMonitoring();
+            
+            // Pindahkan koneksi agar dijalankan secara asinkron setelah Form tampil penuh (mencegah UI Freeze & Force Close)
+            this.Load += (s, e) => 
+            {
+                ConnectToServer();
+                StartMonitoring();
+            };
+        }
+
+        // Helper thread-safety untuk mencegah Exception Cross-thread operation
+        private void SafeInvoke(Action action)
+        {
+            try
+            {
+                if (this.IsHandleCreated && !this.IsDisposed)
+                {
+                    this.Invoke((MethodInvoker)delegate { action(); });
+                }
+            }
+            catch { }
         }
 
         private void InitializeForm()
@@ -187,25 +205,60 @@ namespace SikawanLagustaCaller
 
         private void ConnectToServer()
         {
-            try
+            SafeInvoke(() =>
             {
-                if (tcpClient != null) tcpClient.Close();
-                tcpClient = new TcpClient();
-                tcpClient.Connect(txtServerIp.Text.Trim(), 3000);
-                stream = tcpClient.GetStream();
+                lblConnectionStatus.Text = "● Menghubungkan...";
+                lblConnectionStatus.ForeColor = Color.Orange;
+            });
 
-                lblConnectionStatus.Text = "● Terhubung ke " + txtServerIp.Text.Trim() + ":3000";
-                lblConnectionStatus.ForeColor = Color.Green;
+            string serverIp = txtServerIp.Text.Trim();
 
-                listenThread = new Thread(ListenServerMessages) { IsBackground = true };
-                listenThread.Start();
-                FetchWaitingCount();
-            }
-            catch (Exception ex)
+            // Jalankan percobaan koneksi di Background Thread dengan Timeout agar tidak membekukan UI
+            Thread t = new Thread(() =>
             {
-                lblConnectionStatus.Text = "● Terputus dari Kiosk Host";
-                lblConnectionStatus.ForeColor = Color.Red;
-            }
+                try
+                {
+                    if (tcpClient != null)
+                    {
+                        try { tcpClient.Close(); } catch { }
+                    }
+
+                    tcpClient = new TcpClient();
+                    
+                    IAsyncResult ar = tcpClient.BeginConnect(serverIp, 3000, null, null);
+                    bool connected = ar.AsyncWaitHandle.WaitOne(2500, true);
+
+                    if (connected && tcpClient.Connected)
+                    {
+                        tcpClient.EndConnect(ar);
+                        stream = tcpClient.GetStream();
+
+                        SafeInvoke(() =>
+                        {
+                            lblConnectionStatus.Text = "● Terhubung ke " + serverIp + ":3000";
+                            lblConnectionStatus.ForeColor = Color.Green;
+                        });
+
+                        listenThread = new Thread(ListenServerMessages) { IsBackground = true };
+                        listenThread.Start();
+                        FetchWaitingCount();
+                    }
+                    else
+                    {
+                        tcpClient.Close();
+                        throw new Exception("Connection Timeout");
+                    }
+                }
+                catch
+                {
+                    SafeInvoke(() =>
+                    {
+                        lblConnectionStatus.Text = "● Terputus dari Kiosk Host";
+                        lblConnectionStatus.ForeColor = Color.Red;
+                    });
+                }
+            }) { IsBackground = true };
+            t.Start();
         }
 
         private void ListenServerMessages()
@@ -230,7 +283,7 @@ namespace SikawanLagustaCaller
                         {
                             string cat = parts[1];
                             int count = Convert.ToInt32(parts[2]);
-                            this.Invoke((MethodInvoker)delegate
+                            SafeInvoke(() =>
                             {
                                 if (cbCategory.SelectedItem != null && cbCategory.SelectedItem.ToString().Equals(cat, StringComparison.OrdinalIgnoreCase))
                                 {
@@ -245,7 +298,7 @@ namespace SikawanLagustaCaller
                             int num = Convert.ToInt32(parts[3]);
                             int cnt = Convert.ToInt32(parts[4]);
 
-                            this.Invoke((MethodInvoker)delegate
+                            SafeInvoke(() =>
                             {
                                 if (cbCounter.SelectedItem != null && cbCounter.SelectedItem.ToString() == cnt.ToString())
                                 {
@@ -260,7 +313,7 @@ namespace SikawanLagustaCaller
                 }
                 catch
                 {
-                    this.Invoke((MethodInvoker)delegate
+                    SafeInvoke(() =>
                     {
                         lblConnectionStatus.Text = "● Terputus dari Kiosk Host";
                         lblConnectionStatus.ForeColor = Color.Red;
@@ -274,11 +327,11 @@ namespace SikawanLagustaCaller
         {
             try
             {
-                if (tcpClient == null || !tcpClient.Connected) ConnectToServer();
-                if (tcpClient != null && tcpClient.Connected)
+                if (tcpClient != null && tcpClient.Connected && stream != null)
                 {
                     byte[] data = Encoding.UTF8.GetBytes(message + "\n");
                     stream.Write(data, 0, data.Length);
+                    stream.Flush();
                 }
             }
             catch { }
@@ -293,14 +346,18 @@ namespace SikawanLagustaCaller
 
         private void FetchWaitingCount()
         {
-            if (cbCategory.SelectedItem != null)
+            SafeInvoke(() =>
             {
-                SendSocketMessage("GET_WAITING|" + cbCategory.SelectedItem.ToString());
-            }
+                if (cbCategory.SelectedItem != null)
+                {
+                    SendSocketMessage("GET_WAITING|" + cbCategory.SelectedItem.ToString());
+                }
+            });
         }
 
         private void BtnCallNext_Click(object sender, EventArgs e)
         {
+            if (cbCounter.SelectedItem == null || cbCategory.SelectedItem == null) return;
             int counterNo = Convert.ToInt32(cbCounter.SelectedItem);
             string category = cbCategory.SelectedItem.ToString();
             SendSocketMessage(string.Format("GET_NEXT|{0}|{1}", category, counterNo));
@@ -314,6 +371,7 @@ namespace SikawanLagustaCaller
                 return;
             }
 
+            if (cbCounter.SelectedItem == null) return;
             int counterNo = Convert.ToInt32(cbCounter.SelectedItem);
             SendSocketMessage(string.Format("CALL|{0}|{1}", currentTicketId, counterNo));
         }
@@ -324,6 +382,17 @@ namespace SikawanLagustaCaller
             currentTicketNumber = "---";
             lblCurrentTicket.Text = "---";
             FetchWaitingCount();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            try
+            {
+                if (timerRefresh != null) timerRefresh.Stop();
+                if (tcpClient != null) tcpClient.Close();
+            }
+            catch { }
+            base.OnFormClosing(e);
         }
     }
 }
