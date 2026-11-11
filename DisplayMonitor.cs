@@ -577,21 +577,16 @@ Volume=1000";
             this.Controls.Add(mainPanel);
             mainPanel.BringToFront(); headerPanel.BringToFront(); footerPanel.BringToFront();
 
-            int sw = activeBounds.Width;
-            int sh = activeBounds.Height - 115;
-            int leftW = (int)(sw * 0.60);
-            int rightW = sw - leftW - 40;
-
             // LEFT: VIDEO + INFO
-            Panel leftPanel = new Panel { Location = new Point(20, 20), Size = new Size(leftW, sh - 40), BackColor = Color.Transparent };
+            Panel leftPanel = new Panel { BackColor = Color.Transparent };
             mainPanel.Controls.Add(leftPanel);
 
-            videoPanelHost = new Panel { Dock = DockStyle.Top, Height = (int)(leftPanel.Height * 0.72), BackColor = Color.FromArgb(30, 40, 60) };
+            videoPanelHost = new Panel { Dock = DockStyle.Top, BackColor = Color.FromArgb(30, 40, 60) };
             leftPanel.Controls.Add(videoPanelHost);
 
             InitializeVideoPlayer();
 
-            Panel infoBox = new Panel { Dock = DockStyle.Bottom, Height = leftPanel.Height - videoPanelHost.Height - 15, BackColor = Color.FromArgb(19, 24, 38) };
+            Panel infoBox = new Panel { Dock = DockStyle.Bottom, BackColor = Color.FromArgb(19, 24, 38) };
             leftPanel.Controls.Add(infoBox);
 
             infoBox.Controls.Add(new Label { Text = "INFORMASI", Font = new Font("Segoe UI", 12, FontStyle.Bold),
@@ -602,18 +597,46 @@ Volume=1000";
             });
 
             // RIGHT: QUEUE CARDS
-            Panel rightPanel = new Panel { Location = new Point(leftW + 30, 20), Size = new Size(rightW, sh - 40), BackColor = Color.Transparent };
+            Panel rightPanel = new Panel { BackColor = Color.Transparent };
             mainPanel.Controls.Add(rightPanel);
 
-            int cardH = (rightPanel.Height - 20) / 2;
-
             Panel cardKunjungan = CreateQueueCard("KUNJUNGAN", Color.FromArgb(41, 182, 216), "A000", "LOKET 1", out lblKunjunganNumber, out lblKunjunganCounter);
-            cardKunjungan.Dock = DockStyle.Top; cardKunjungan.Height = cardH;
             rightPanel.Controls.Add(cardKunjungan);
 
             Panel cardPenitipan = CreateQueueCard("PENITIPAN BARANG", Color.FromArgb(136, 108, 179), "B000", "LOKET 2", out lblPenitipanNumber, out lblPenitipanCounter);
-            cardPenitipan.Dock = DockStyle.Bottom; cardPenitipan.Height = cardH;
             rightPanel.Controls.Add(cardPenitipan);
+
+            // Responsive Layout Manager (Otomatis mengisi 100% tinggi layar tanpa ruang kosong di bawah)
+            Action performResponsiveLayout = () =>
+            {
+                int mainW = mainPanel.ClientSize.Width;
+                int mainH = mainPanel.ClientSize.Height;
+                if (mainW <= 0 || mainH <= 0) return;
+
+                int gap = 20;
+                int leftW = (int)(mainW * 0.58);
+                int rightW = mainW - leftW - (gap * 3);
+
+                leftPanel.Location = new Point(gap, gap);
+                leftPanel.Size = new Size(leftW, mainH - (gap * 2));
+
+                rightPanel.Location = new Point(leftW + (gap * 2), gap);
+                rightPanel.Size = new Size(rightW, mainH - (gap * 2));
+
+                int videoH = (int)(leftPanel.Height * 0.70);
+                videoPanelHost.Height = videoH;
+                infoBox.Height = leftPanel.Height - videoH - gap;
+
+                int cardH = (rightPanel.Height - gap) / 2;
+                cardKunjungan.Location = new Point(0, 0);
+                cardKunjungan.Size = new Size(rightW, cardH);
+
+                cardPenitipan.Location = new Point(0, cardH + gap);
+                cardPenitipan.Size = new Size(rightW, cardH);
+            };
+
+            mainPanel.Resize += (s, e) => performResponsiveLayout();
+            this.Load += (s, e) => performResponsiveLayout();
         }
 
         private void InitializeVideoPlayer()
@@ -665,11 +688,13 @@ Volume=1000";
                     Color.FromArgb(200, 210, 225), 2, ButtonBorderStyle.Solid);
             };
 
-            Label lblNum = new Label { Text = defNum, Font = new Font("Segoe UI", 56, FontStyle.Bold),
-                ForeColor = Color.FromArgb(20, 25, 35), TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
-            card.Controls.Add(lblNum);
-            numLabel = lblNum;
+            // 1. Header (Dock Top) - Ditambahkan pertama agar tidak tertutup oleh Dock Fill
+            Label lblHeader = new Label { Text = title, Font = new Font("Segoe UI", 16, FontStyle.Bold),
+                ForeColor = Color.White, BackColor = color, TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Top, Height = 48 };
+            card.Controls.Add(lblHeader);
 
+            // 2. Counter Footer (Dock Bottom)
             Panel pnlCounter = new Panel { Dock = DockStyle.Bottom, Height = 55, BackColor = Color.White };
             card.Controls.Add(pnlCounter);
 
@@ -679,10 +704,11 @@ Volume=1000";
             pnlCounter.Controls.Add(lblCnt);
             counterLabel = lblCnt;
 
-            Label lblHeader = new Label { Text = title, Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = Color.White, BackColor = color, TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Top, Height = 45 };
-            card.Controls.Add(lblHeader);
+            // 3. Number Label (Dock Fill) - Ditambahkan terakhir untuk mengisi bagian tengah secara presisi
+            Label lblNum = new Label { Text = defNum, Font = new Font("Segoe UI", 60, FontStyle.Bold),
+                ForeColor = Color.FromArgb(20, 25, 35), TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
+            card.Controls.Add(lblNum);
+            numLabel = lblNum;
 
             return card;
         }
