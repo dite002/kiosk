@@ -128,7 +128,7 @@ namespace SikawanLagustaKiosk
                         connectedClients.Add(client);
                     }
 
-                    // Kirim state terakhir antrian ke client baru agar DisplayMonitor sinkron
+                    // Kirim state terakhir antrian ke client baru agar DisplayMonitor & Caller sinkron
                     SendInitialSync(client);
 
                     Thread clientThread = new Thread(HandleClientComm) { IsBackground = true };
@@ -138,18 +138,13 @@ namespace SikawanLagustaKiosk
             }
         }
 
-        /// <summary>
-        /// Kirim nomor antrian terakhir ke client yang baru connect (DisplayMonitor)
-        /// </summary>
         private void SendInitialSync(TcpClient client)
         {
             try
             {
-                // Kirim SYNC untuk kunjungan
                 int lastKunjungan = GetLastTicketNumber("kunjungan");
                 string syncA = string.Format("SYNC|kunjungan|A|{0}\n", lastKunjungan);
 
-                // Kirim SYNC untuk penitipan
                 int lastPenitipan = GetLastTicketNumber("penitipan");
                 string syncB = string.Format("SYNC|penitipan|B|{0}\n", lastPenitipan);
 
@@ -159,6 +154,15 @@ namespace SikawanLagustaKiosk
                 NetworkStream stream = client.GetStream();
                 stream.Write(dataA, 0, dataA.Length);
                 stream.Write(dataB, 0, dataB.Length);
+                stream.Flush();
+
+                // Kirim jumlah antrean menunggu langsung saat connect
+                int countKunjungan = GetWaitingCountFromDb("kunjungan");
+                int countPenitipan = GetWaitingCountFromDb("penitipan");
+                byte[] wA = Encoding.UTF8.GetBytes(string.Format("WAITING_COUNT|kunjungan|{0}\n", countKunjungan));
+                byte[] wB = Encoding.UTF8.GetBytes(string.Format("WAITING_COUNT|penitipan|{0}\n", countPenitipan));
+                stream.Write(wA, 0, wA.Length);
+                stream.Write(wB, 0, wB.Length);
                 stream.Flush();
             }
             catch { }
@@ -184,7 +188,6 @@ namespace SikawanLagustaKiosk
 
                 msgBuffer += Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
-                // Proses setiap pesan yang diakhiri dengan newline
                 while (msgBuffer.Contains("\n"))
                 {
                     int nlIndex = msgBuffer.IndexOf('\n');
@@ -193,18 +196,7 @@ namespace SikawanLagustaKiosk
 
                     if (!string.IsNullOrEmpty(msg))
                     {
-                        ProcessIncomingSocketMessage(msg);
-                    }
-                }
-
-                // Fallback: pesan tanpa newline (kompatibilitas format lama)
-                if (!string.IsNullOrEmpty(msgBuffer) && msgBuffer.Contains("|"))
-                {
-                    string[] testParts = msgBuffer.Split('|');
-                    if (testParts.Length >= 3 && testParts[0] == "CALL")
-                    {
-                        ProcessIncomingSocketMessage(msgBuffer.Trim());
-                        msgBuffer = "";
+                        ProcessIncomingSocketMessage(msg, tcpClient);
                     }
                 }
             }
@@ -216,23 +208,22 @@ namespace SikawanLagustaKiosk
             tcpClient.Close();
         }
 
-        private void ProcessIncomingSocketMessage(string message)
+        private void ProcessIncomingSocketMessage(string message, TcpClient currentClient)
         {
-            // Format perintah dari CallerApp: CALL|ticketId|counterNo atau GET_WAITING|category
             message = message.Trim();
             string[] parts = message.Split('|');
             if (parts.Length >= 3 && parts[0] == "CALL")
             {
                 string ticketId = parts[1].Trim();
                 int counterNo = Convert.ToInt32(parts[2].Trim());
-
                 ProcessCallTicket(ticketId, counterNo);
             }
             else if (parts.Length >= 2 && parts[0] == "GET_WAITING")
             {
                 string category = parts[1].Trim();
                 int count = GetWaitingCountFromDb(category);
-                BroadcastMessage(string.Format("WAITING_COUNT|{0}|{1}", category, count));
+                string responseMsg = string.Format("WAITING_COUNT|{0}|{1}\n", category, count);
+                SendToClient(currentClient, responseMsg);
             }
             else if (parts.Length >= 3 && parts[0] == "GET_NEXT")
             {
@@ -242,51 +233,16 @@ namespace SikawanLagustaKiosk
             }
         }
 
-        private int GetWaitingCountFromDb(string category)
-        {
-            int count = 0;
-            try
-            {
-                using (SQLiteConnection conn = new SQLiteConnection(connectionString))
-                {
-                    conn.Open();
-                    string sql = "SELECT COUNT(*) FROM tickets WHERE category = @cat AND status = 'waiting' AND date(created_at) = date('now', 'localtime')";
-                    using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@cat", category);
-                        count = Convert.ToInt32(cmd.ExecuteScalar());
-                    }
-                }
-            }
-            catch { }
-            return count;
-        }
-
-        private void CallNextTicketFromDb(string category, int counterNo)
+        private void SendToClient(TcpClient client, string message)
         {
             try
             {
-                using (SQLiteConnection conn = new SQLiteConnection(connectionString))
+                if (client != null && client.Connected)
                 {
-                    conn.Open();
-                    string sqlGet = @"
-                        SELECT id, prefix, number 
-                        FROM tickets 
-                        WHERE category = @cat AND status = 'waiting' AND date(created_at) = date('now', 'localtime')
-                        ORDER BY number ASC LIMIT 1";
-
-                    using (SQLiteCommand cmd = new SQLiteCommand(sqlGet, conn))
-                    {
-                        cmd.Parameters.AddWithValue("@cat", category);
-                        using (SQLiteDataReader reader = cmd.ExecuteReader())
-                        {
-                            if (reader.Read())
-                            {
-                                string ticketId = reader["id"].ToString();
-                                ProcessCallTicket(ticketId, counterNo);
-                            }
-                        }
-                    }
+                    byte[] data = Encoding.UTF8.GetBytes(message);
+                    NetworkStream ns = client.GetStream();
+                    ns.Write(data, 0, data.Length);
+                    ns.Flush();
                 }
             }
             catch { }
@@ -350,6 +306,64 @@ namespace SikawanLagustaKiosk
                     catch { }
                 }
             }
+        }
+
+        private int GetWaitingCountFromDb(string category)
+        {
+            int count = 0;
+            try
+            {
+                using (SQLiteConnection conn = new SQLiteConnection(connectionString))
+                {
+                    conn.Open();
+                    string sql = @"
+                        SELECT COUNT(*) FROM tickets 
+                        WHERE category = @cat AND status = 'waiting' 
+                          AND (date(created_at) = date('now', 'localtime') OR date(created_at) = date('now'))";
+                    using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@cat", category);
+                        count = Convert.ToInt32(cmd.ExecuteScalar());
+                    }
+                }
+            }
+            catch { }
+            return count;
+        }
+
+        private void CallNextTicketFromDb(string category, int counterNo)
+        {
+            try
+            {
+                using (SQLiteConnection conn = new SQLiteConnection(connectionString))
+                {
+                    conn.Open();
+                    // Cari antrean paling lama (berdasarkan created_at dan number) yang masih 'waiting' hari ini
+                    string sqlFind = @"
+                        SELECT id FROM tickets 
+                        WHERE category = @cat AND status = 'waiting' 
+                          AND (date(created_at) = date('now', 'localtime') OR date(created_at) = date('now'))
+                        ORDER BY datetime(created_at) ASC, number ASC LIMIT 1";
+
+                    string ticketId = null;
+                    using (SQLiteCommand cmdFind = new SQLiteCommand(sqlFind, conn))
+                    {
+                        cmdFind.Parameters.AddWithValue("@cat", category);
+                        object result = cmdFind.ExecuteScalar();
+                        if (result != null && result != DBNull.Value)
+                        {
+                            ticketId = result.ToString();
+                        }
+                    }
+
+                    // Jika antrean ditemukan, langsung panggil
+                    if (!string.IsNullOrEmpty(ticketId))
+                    {
+                        ProcessCallTicket(ticketId, counterNo);
+                    }
+                }
+            }
+            catch { }
         }
 
         // -------------------------------------------------------------

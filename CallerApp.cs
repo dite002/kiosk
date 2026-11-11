@@ -26,6 +26,7 @@ namespace SikawanLagustaCaller
         private ComboBox cbCategory;
         private Label lblCurrentTicket;
         private Label lblWaitingCount;
+        private Label lblConnectionStatus;
         private Button btnCallNext;
         private Button btnRecall;
         private Button btnComplete;
@@ -49,7 +50,7 @@ namespace SikawanLagustaCaller
         private void InitializeForm()
         {
             this.Text = "Caller App - Petugas Loket (Client Network)";
-            this.Size = new Size(480, 560);
+            this.Size = new Size(480, 580);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -64,32 +65,42 @@ namespace SikawanLagustaCaller
                 Text = " Pengaturan Server & Loket ",
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
                 Location = new Point(20, 15),
-                Size = new Size(425, 125)
+                Size = new Size(425, 140)
             };
             this.Controls.Add(gbSetting);
 
             Label lblIp = new Label { Text = "IP Kiosk Host:", Location = new Point(15, 30), AutoSize = true, Font = new Font("Segoe UI", 9) };
             gbSetting.Controls.Add(lblIp);
 
-            txtServerIp = new TextBox { Text = "192.168.3.251", Location = new Point(110, 27), Width = 200 };
+            txtServerIp = new TextBox { Text = "192.168.3.251", Location = new Point(110, 27), Width = 190 };
             gbSetting.Controls.Add(txtServerIp);
 
-            Button btnConnect = new Button { Text = "Hubungkan", Location = new Point(315, 25), Width = 90, Height = 26 };
+            Button btnConnect = new Button { Text = "Hubungkan", Location = new Point(310, 25), Width = 100, Height = 26 };
             btnConnect.Click += (s, e) => ConnectToServer();
             gbSetting.Controls.Add(btnConnect);
 
-            Label lbl1 = new Label { Text = "Loket:", Location = new Point(15, 75), AutoSize = true, Font = new Font("Segoe UI", 9) };
+            lblConnectionStatus = new Label
+            {
+                Text = "● Terputus dari Kiosk Host",
+                ForeColor = Color.Red,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                Location = new Point(110, 53),
+                AutoSize = true
+            };
+            gbSetting.Controls.Add(lblConnectionStatus);
+
+            Label lbl1 = new Label { Text = "Loket:", Location = new Point(15, 90), AutoSize = true, Font = new Font("Segoe UI", 9) };
             gbSetting.Controls.Add(lbl1);
 
-            cbCounter = new ComboBox { Location = new Point(60, 72), Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
+            cbCounter = new ComboBox { Location = new Point(60, 87), Width = 90, DropDownStyle = ComboBoxStyle.DropDownList };
             cbCounter.Items.AddRange(new object[] { "1", "2", "3", "4", "5" });
             cbCounter.SelectedIndex = 0;
             gbSetting.Controls.Add(cbCounter);
 
-            Label lbl2 = new Label { Text = "Layanan:", Location = new Point(170, 75), AutoSize = true, Font = new Font("Segoe UI", 9) };
+            Label lbl2 = new Label { Text = "Layanan:", Location = new Point(170, 90), AutoSize = true, Font = new Font("Segoe UI", 9) };
             gbSetting.Controls.Add(lbl2);
 
-            cbCategory = new ComboBox { Location = new Point(235, 72), Width = 170, DropDownStyle = ComboBoxStyle.DropDownList };
+            cbCategory = new ComboBox { Location = new Point(235, 87), Width = 175, DropDownStyle = ComboBoxStyle.DropDownList };
             cbCategory.Items.AddRange(new object[] { "kunjungan", "penitipan" });
             cbCategory.SelectedIndex = 0;
             cbCategory.SelectedIndexChanged += (s, e) => FetchWaitingCount();
@@ -100,7 +111,7 @@ namespace SikawanLagustaCaller
             {
                 Text = " Antrean Sedang Dilayani ",
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                Location = new Point(20, 150),
+                Location = new Point(20, 165),
                 Size = new Size(425, 170)
             };
             this.Controls.Add(gbActive);
@@ -135,7 +146,7 @@ namespace SikawanLagustaCaller
                 BackColor = Color.FromArgb(40, 167, 69),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Location = new Point(20, 335),
+                Location = new Point(20, 350),
                 Size = new Size(425, 50),
                 Cursor = Cursors.Hand
             };
@@ -150,7 +161,7 @@ namespace SikawanLagustaCaller
                 BackColor = Color.FromArgb(255, 193, 7),
                 ForeColor = Color.FromArgb(30, 30, 30),
                 FlatStyle = FlatStyle.Flat,
-                Location = new Point(20, 400),
+                Location = new Point(20, 415),
                 Size = new Size(205, 45),
                 Cursor = Cursors.Hand
             };
@@ -165,7 +176,7 @@ namespace SikawanLagustaCaller
                 BackColor = Color.FromArgb(23, 162, 184),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Location = new Point(240, 400),
+                Location = new Point(240, 415),
                 Size = new Size(205, 45),
                 Cursor = Cursors.Hand
             };
@@ -183,13 +194,17 @@ namespace SikawanLagustaCaller
                 tcpClient.Connect(txtServerIp.Text.Trim(), 3000);
                 stream = tcpClient.GetStream();
 
+                lblConnectionStatus.Text = "● Terhubung ke " + txtServerIp.Text.Trim() + ":3000";
+                lblConnectionStatus.ForeColor = Color.Green;
+
                 listenThread = new Thread(ListenServerMessages) { IsBackground = true };
                 listenThread.Start();
                 FetchWaitingCount();
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Gagal terhubung ke Kiosk Host (" + txtServerIp.Text + ":3000):\n" + ex.Message, "Koneksi Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                lblConnectionStatus.Text = "● Terputus dari Kiosk Host";
+                lblConnectionStatus.ForeColor = Color.Red;
             }
         }
 
@@ -243,7 +258,15 @@ namespace SikawanLagustaCaller
                         }
                     }
                 }
-                catch { break; }
+                catch
+                {
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        lblConnectionStatus.Text = "● Terputus dari Kiosk Host";
+                        lblConnectionStatus.ForeColor = Color.Red;
+                    });
+                    break;
+                }
             }
         }
 
