@@ -19,69 +19,44 @@ namespace SikawanLagustaKiosk
 {
     static class Program
     {
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        private static extern bool SetDllDirectory(string lpPathName);
+
         [STAThread]
         static void Main()
         {
-            // Auto Extract & Load SQLite Interop DLL (Native C++) & Managed Assembly
-            EnsureSQLiteLibraries();
+            // Daftarkan lokasi folder DLL C++ Native (x64 / x86) ke Windows DLL Search Path
+            SetupDllDirectories();
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new KioskForm());
         }
 
-        private static void EnsureSQLiteLibraries()
+        private static void SetupDllDirectories()
         {
             try
             {
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                string x64Dir = Path.Combine(baseDir, "x64");
-                string x86Dir = Path.Combine(baseDir, "x86");
+                string is64 = IntPtr.Size == 8 ? "x64" : "x86";
+                string archDir = Path.Combine(baseDir, is64);
 
-                Directory.CreateDirectory(x64Dir);
-                Directory.CreateDirectory(x86Dir);
-
-                // Ekstrak SQLite.Interop.dll ke folder x64 dan x86 jika belum ada
-                ExtractResourceToFile("SQLite.Interop.dll", Path.Combine(x64Dir, "SQLite.Interop.dll"));
-                ExtractResourceToFile("SQLite.Interop.dll", Path.Combine(x86Dir, "SQLite.Interop.dll"));
-                ExtractResourceToFile("SQLite.Interop.dll", Path.Combine(baseDir, "SQLite.Interop.dll"));
-                ExtractResourceToFile("System.Data.SQLite.dll", Path.Combine(baseDir, "System.Data.SQLite.dll"));
-
-                // Dynamic Assembly Resolve untuk System.Data.SQLite
-                AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+                // Buat folder x64/x86 otomatis jika belum ada dan copy SQLite.Interop.dll dari root
+                if (!Directory.Exists(archDir))
                 {
-                    string asmName = new System.Reflection.AssemblyName(args.Name).Name;
-                    if (asmName.Equals("System.Data.SQLite", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string localDll = Path.Combine(baseDir, "System.Data.SQLite.dll");
-                        if (File.Exists(localDll))
-                        {
-                            return System.Reflection.Assembly.LoadFrom(localDll);
-                        }
-                    }
-                    return null;
-                };
-            }
-            catch { }
-        }
-
-        private static void ExtractResourceToFile(string resourceName, string targetPath)
-        {
-            if (File.Exists(targetPath)) return;
-
-            try
-            {
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-                {
-                    if (stream != null)
-                    {
-                        using (FileStream fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
-                        {
-                            stream.CopyTo(fs);
-                        }
-                    }
+                    Directory.CreateDirectory(archDir);
                 }
+
+                string sourceInterop = Path.Combine(baseDir, "SQLite.Interop.dll");
+                string targetInterop = Path.Combine(archDir, "SQLite.Interop.dll");
+
+                if (File.Exists(sourceInterop) && !File.Exists(targetInterop))
+                {
+                    File.Copy(sourceInterop, targetInterop, true);
+                }
+
+                // Beritahu Windows untuk mencari DLL C++ di folder x64/x86 & root
+                SetDllDirectory(archDir);
             }
             catch { }
         }
