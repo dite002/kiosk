@@ -487,37 +487,37 @@ Volume=1000";
                 using (SQLiteConnection conn = new SQLiteConnection(connectionString))
                 {
                     conn.Open();
-                    LoadLastCalledByCounter(conn, 1, lblKunjunganNumber, lblKunjunganCounter);
-                    LoadLastCalledByCounter(conn, 2, lblPenitipanNumber, lblPenitipanCounter);
+                    LoadLastCalledByCategory(conn, "kunjungan", lblKunjunganNumber, lblKunjunganCounter, 1);
+                    LoadLastCalledByCategory(conn, "penitipan", lblPenitipanNumber, lblPenitipanCounter, 2);
                 }
             }
             catch { }
         }
 
-        private void LoadLastCalledByCounter(SQLiteConnection conn, int counterNo, Label lblNum, Label lblCnt)
+        private void LoadLastCalledByCategory(SQLiteConnection conn, string category, Label lblNum, Label lblCnt, int defaultCounterNo)
         {
-            string defaultPrefix = (counterNo == 1) ? "A" : "B";
+            string defaultPrefix = category.Equals("kunjungan", StringComparison.OrdinalIgnoreCase) ? "A" : "B";
 
-            // Hanya ambil antrean yang STATUSNYA 'called' (SUDAH DIPANGGIL LOKET) hari ini
+            // Filter antrean berdasarkan KATEGORI (bukan nomor loket) yang berstatus 'called' hari ini
             string sqlCalled = @"SELECT prefix, number, counter_number FROM tickets 
-                                 WHERE counter_number = @counterNo AND status = 'called' 
+                                 WHERE category = @category AND status = 'called' 
                                    AND date(created_at) = date('now', 'localtime')
                                  ORDER BY datetime(created_at) DESC, number DESC LIMIT 1";
             using (SQLiteCommand cmd = new SQLiteCommand(sqlCalled, conn))
             {
-                cmd.Parameters.AddWithValue("@counterNo", counterNo);
+                cmd.Parameters.AddWithValue("@category", category);
                 using (SQLiteDataReader reader = cmd.ExecuteReader())
                 {
                     if (reader.Read())
                     {
                         lblNum.Text = reader["prefix"].ToString() + Convert.ToInt32(reader["number"]).ToString("D3");
-                        lblCnt.Text = "LOKET " + counterNo;
+                        lblCnt.Text = "LOKET " + reader["counter_number"].ToString();
                     }
                     else
                     {
-                        // Jika BELUM ADA yang dipanggil oleh petugas loket hari ini, tetap tampilkan A000 / B000
+                        // Jika BELUM ADA antrean kategori ini yang dipanggil hari ini, tampilkan A000 / B000
                         lblNum.Text = defaultPrefix + "000";
-                        lblCnt.Text = "LOKET " + counterNo;
+                        lblCnt.Text = "LOKET " + defaultCounterNo;
                     }
                 }
             }
@@ -688,27 +688,30 @@ Volume=1000";
                     Color.FromArgb(200, 210, 225), 2, ButtonBorderStyle.Solid);
             };
 
-            // 1. Header (Dock Top) - Ditambahkan pertama agar tidak tertutup oleh Dock Fill
+            // 1. Panel Header Atas (KUNJUNGAN / PENITIPAN BARANG) - Terisolasi penuh tanpa saling tumpuk
+            Panel pnlHeader = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = color };
             Label lblHeader = new Label { Text = title, Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = Color.White, BackColor = color, TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Top, Height = 48 };
-            card.Controls.Add(lblHeader);
+                ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
+            pnlHeader.Controls.Add(lblHeader);
 
-            // 2. Counter Footer (Dock Bottom)
-            Panel pnlCounter = new Panel { Dock = DockStyle.Bottom, Height = 55, BackColor = Color.White };
-            card.Controls.Add(pnlCounter);
-
+            // 2. Panel Footer Bawah (LOKET 1 / LOKET 2)
+            Panel pnlCounter = new Panel { Dock = DockStyle.Bottom, Height = 55, BackColor = Color.FromArgb(25, 35, 55) };
             Label lblCnt = new Label { Text = defCounter, Font = new Font("Segoe UI", 18, FontStyle.Bold),
-                ForeColor = Color.White, BackColor = Color.FromArgb(25, 35, 55),
-                TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
+                ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
             pnlCounter.Controls.Add(lblCnt);
             counterLabel = lblCnt;
 
-            // 3. Number Label (Dock Fill) - Ditambahkan terakhir untuk mengisi bagian tengah secara presisi
+            // 3. Panel Tengah (Nomor Antrean A000 / B000)
+            Panel pnlBody = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
             Label lblNum = new Label { Text = defNum, Font = new Font("Segoe UI", 60, FontStyle.Bold),
                 ForeColor = Color.FromArgb(20, 25, 35), TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
-            card.Controls.Add(lblNum);
+            pnlBody.Controls.Add(lblNum);
             numLabel = lblNum;
+
+            // Masukkan panel dengan urutan docking WinForms yang tepat
+            card.Controls.Add(pnlBody);
+            card.Controls.Add(pnlCounter);
+            card.Controls.Add(pnlHeader);
 
             return card;
         }
