@@ -378,6 +378,9 @@ Volume=1000";
 
         private string tcpMessageBuffer = "";
 
+        // Variable untuk mekanisme auto-retry / continuous monitor detection
+        private Timer timerMonitorCheck;
+
         public DisplayForm()
         {
             serverIp = ConfigHelper.GetValue("Server", "ServerIP", "127.0.0.1");
@@ -386,6 +389,7 @@ Volume=1000";
             BuildUI();
             LoadLastQueueFromDatabase();
             StartClockTimer();
+            StartMonitorCheckTimer();
             ConnectToSocketServer();
         }
 
@@ -396,14 +400,31 @@ Volume=1000";
             this.BackColor = Color.FromArgb(19, 24, 38);
             this.DoubleBuffered = true;
 
-            // Logika Deteksi & Penentuan Monitor via config.ini
+            // Atur posisi awal monitor saat aplikasi pertama kali terbuka
+            ApplyTargetScreenBounds();
+
+            string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
+            if (File.Exists(icoPath))
+            {
+                try { this.Icon = new Icon(icoPath); } catch { }
+            }
+
+            this.KeyPreview = true;
+            this.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Application.Exit(); };
+        }
+
+        /// <summary>
+        /// Mengecek dan menerapkan posisi form ke target monitor (Monitor 2 / Layar Sekunder)
+        /// </summary>
+        private bool ApplyTargetScreenBounds()
+        {
             int targetMonitorIndex = 1;
             int.TryParse(ConfigHelper.GetValue("Display", "MonitorIndex", "2"), out targetMonitorIndex);
-            
+
             string screenXStr = ConfigHelper.GetValue("Display", "ScreenX", "");
             Screen targetScreen = Screen.PrimaryScreen;
 
-            // 1. Jika ScreenX diisi manual di config.ini (Deklarasi variabel terpisah untuk C# 5)
+            // 1. Pengecekan koordinat X manual dari config.ini
             int customX = 0;
             if (!string.IsNullOrEmpty(screenXStr) && int.TryParse(screenXStr, out customX))
             {
@@ -416,30 +437,45 @@ Volume=1000";
                     }
                 }
             }
-            // 2. Menggunakan MonitorIndex dari config (misal: 2 untuk Monitor Kedua)
+            // 2. Pengecekan berdasarkan indeks monitor (misal: Monitor 2)
             else if (targetMonitorIndex > 0 && targetMonitorIndex <= Screen.AllScreens.Length)
             {
                 targetScreen = Screen.AllScreens[targetMonitorIndex - 1];
             }
-            // 3. Fallback: Pindah ke monitor kedua jika ada lebih dari 1 monitor
+            // 3. Fallback: Gunakan monitor kedua jika jumlah monitor > 1
             else if (Screen.AllScreens.Length > 1)
             {
                 targetScreen = Screen.AllScreens[1];
             }
 
-            // Atur posisi dan ukuran window persis sesuai layar target
-            this.StartPosition = FormStartPosition.Manual;
-            this.Bounds = targetScreen.Bounds;
-            this.WindowState = FormWindowState.Maximized;
-
-            string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
-            if (File.Exists(icoPath))
+            // Bandingkan apakah posisi form saat ini sudah berada di targetScreen
+            if (this.Bounds != targetScreen.Bounds)
             {
-                try { this.Icon = new Icon(icoPath); } catch { }
+                this.StartPosition = FormStartPosition.Manual;
+                this.Bounds = targetScreen.Bounds;
+                this.WindowState = FormWindowState.Maximized;
+                return true; // Berhasil berpindah lokasi layar
             }
 
-            this.KeyPreview = true;
-            this.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) Application.Exit(); };
+            return false; // Posisi layar sudah sesuai
+        }
+
+        /// <summary>
+        /// Timer periodik untuk terus memantau apakah Monitor 2 sudah terdeteksi
+        /// </summary>
+        private void StartMonitorCheckTimer()
+        {
+            timerMonitorCheck = new Timer { Interval = 2000 }; // Cek setiap 2 detik
+            timerMonitorCheck.Tick += (s, e) =>
+            {
+                try
+                {
+                    // Jika Monitor 2 baru menyala / terdeteksi, pindahkan posisi window secara otomatis
+                    ApplyTargetScreenBounds();
+                }
+                catch { }
+            };
+            timerMonitorCheck.Start();
         }
 
         private void LoadLastQueueFromDatabase()
@@ -861,6 +897,7 @@ Volume=1000";
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            try { if (timerMonitorCheck != null) timerMonitorCheck.Stop(); } catch { }
             try { if (tcpClient != null) tcpClient.Close(); } catch { }
             base.OnFormClosing(e);
         }
