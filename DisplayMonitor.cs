@@ -91,6 +91,10 @@ BaseIP=
 [Display]
 ; Path video untuk banner di Display Monitor
 VideoPath=video\video.mp4
+; Indeks Monitor (1 = Monitor Utama, 2 = Monitor Kedua/TV)
+MonitorIndex=2
+; Koordinat X manual jika ingin offset (misal: 1920 atau 0)
+ScreenX=
 
 [Audio]
 ; Folder file suara panggilan
@@ -392,11 +396,34 @@ Volume=1000";
             this.BackColor = Color.FromArgb(19, 24, 38);
             this.DoubleBuffered = true;
 
-            // Logika Deteksi Multi-Monitor (Otomatis pindah ke Monitor 2 jika ada)
+            // Logika Deteksi & Penentuan Monitor via config.ini
+            int targetMonitorIndex = 1;
+            int.TryParse(ConfigHelper.GetValue("Display", "MonitorIndex", "2"), out targetMonitorIndex);
+            
+            string screenXStr = ConfigHelper.GetValue("Display", "ScreenX", "");
             Screen targetScreen = Screen.PrimaryScreen;
-            if (Screen.AllScreens.Length > 1)
+
+            // 1. Jika ScreenX diisi manual di config.ini (Deklarasi variabel terpisah untuk C# 5)
+            int customX = 0;
+            if (!string.IsNullOrEmpty(screenXStr) && int.TryParse(screenXStr, out customX))
             {
-                // Pilih layar kedua (indeks 1)
+                foreach (Screen scr in Screen.AllScreens)
+                {
+                    if (customX >= scr.Bounds.Left && customX <= scr.Bounds.Right)
+                    {
+                        targetScreen = scr;
+                        break;
+                    }
+                }
+            }
+            // 2. Menggunakan MonitorIndex dari config (misal: 2 untuk Monitor Kedua)
+            else if (targetMonitorIndex > 0 && targetMonitorIndex <= Screen.AllScreens.Length)
+            {
+                targetScreen = Screen.AllScreens[targetMonitorIndex - 1];
+            }
+            // 3. Fallback: Pindah ke monitor kedua jika ada lebih dari 1 monitor
+            else if (Screen.AllScreens.Length > 1)
+            {
                 targetScreen = Screen.AllScreens[1];
             }
 
