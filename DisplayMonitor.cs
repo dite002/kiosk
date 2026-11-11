@@ -22,42 +22,120 @@ namespace SikawanLagustaDisplay
         [STAThread]
         static void Main()
         {
+            // Register pemuat DLL SQLite otomatis dari Embedded Resources
+            AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+            {
+                string asmName = new System.Reflection.AssemblyName(args.Name).Name;
+                if (asmName.Equals("System.Data.SQLite", StringComparison.OrdinalIgnoreCase))
+                {
+                    return LoadEmbeddedAssembly("System.Data.SQLite.dll");
+                }
+                return null;
+            };
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            // Pastikan config.ini ada / dibuat otomatis sebelum UI berjalan
+            ConfigHelper.EnsureConfigFile();
+
             Application.Run(new DisplayForm());
+        }
+
+        private static System.Reflection.Assembly LoadEmbeddedAssembly(string fileName)
+        {
+            try
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                using (Stream stream = assembly.GetManifestResourceStream(fileName))
+                {
+                    if (stream != null)
+                    {
+                        byte[] data = new byte[stream.Length];
+                        stream.Read(data, 0, data.Length);
+                        return System.Reflection.Assembly.Load(data);
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
     }
 
     // =========================================================================
-    // HELPER UNTUK MEMBACA CONFIG/INI & DISCOVERY SERVER AUTOMATIS
+    // CONFIG HELPER (Membaca, Mengubah, & Auto-Generate config.ini)
     // =========================================================================
     public static class ConfigHelper
     {
-        private static readonly string iniPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "kiosk.ini");
+        private static readonly string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");
+
+        public static void EnsureConfigFile()
+        {
+            // Auto-Generate Folder 'video' dan 'audio' jika belum ada di PC baru
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            try { Directory.CreateDirectory(Path.Combine(baseDir, "video")); } catch { }
+            try { Directory.CreateDirectory(Path.Combine(baseDir, "audio")); } catch { }
+
+            if (!File.Exists(configPath))
+            {
+                string defaultConfig = @"[Server]
+; IP Server Kiosk (host TCP socket server)
+ServerIP=100.95.24.73
+Port=3000
+
+[Network]
+; Auto-scan range jika ServerIP tidak terhubung
+AutoScan=false
+BaseIP=
+
+[Display]
+; Path video untuk banner di Display Monitor
+VideoPath=video\video.mp4
+
+[Audio]
+; Folder file suara panggilan
+AudioFolder=audio
+; Volume (0-1000)
+Volume=1000";
+
+                try
+                {
+                    File.WriteAllText(configPath, defaultConfig, Encoding.UTF8);
+                }
+                catch { }
+            }
+        }
 
         public static string GetValue(string section, string key, string defaultValue)
         {
-            if (!File.Exists(iniPath)) return defaultValue;
-
+            EnsureConfigFile();
             try
             {
-                string[] lines = File.ReadAllLines(iniPath);
-                string currentSection = "";
-
-                foreach (string line in lines)
+                if (!File.Exists(configPath)) return defaultValue;
+                string[] lines = File.ReadAllLines(configPath);
+                string currentSec = "";
+                foreach (string rawLine in lines)
                 {
-                    string trimmed = line.Trim();
-                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                    string line = rawLine.Trim();
+                    if (line.StartsWith(";") || line.StartsWith("#")) continue;
+
+                    if (line.StartsWith("[") && line.EndsWith("]"))
                     {
-                        currentSection = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                        currentSec = line.Substring(1, line.Length - 2).Trim();
+                        continue;
                     }
-                    else if (!trimmed.StartsWith(";") && !trimmed.StartsWith("#") && trimmed.Contains("="))
+
+                    if (currentSec.Equals(section, StringComparison.OrdinalIgnoreCase))
                     {
-                        string[] parts = trimmed.Split(new char[] { '=' }, 2);
-                        if (currentSection.Equals(section, StringComparison.OrdinalIgnoreCase) &&
-                            parts[0].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                        int eq = line.IndexOf('=');
+                        if (eq > 0)
                         {
-                            return parts[1].Trim();
+                            string k = line.Substring(0, eq).Trim();
+                            string v = line.Substring(eq + 1).Trim();
+                            if (k.Equals(key, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return string.IsNullOrEmpty(v) ? defaultValue : v;
+                            }
                         }
                     }
                 }
@@ -68,41 +146,50 @@ namespace SikawanLagustaDisplay
 
         public static void SetValue(string section, string key, string value)
         {
+            EnsureConfigFile();
             try
             {
-                List<string> lines = File.Exists(iniPath) ? File.ReadAllLines(iniPath).ToList() : new List<string>();
-                int sectionIdx = -1;
-                int keyIdx = -1;
+                if (!File.Exists(configPath)) return;
+                List<string> lines = new List<string>(File.ReadAllLines(configPath));
+                int sectionIndex = -1;
+                int keyIndex = -1;
+                string currentSec = "";
 
                 for (int i = 0; i < lines.Count; i++)
                 {
-                    string trimmed = lines[i].Trim();
-                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                    string line = lines[i].Trim();
+                    if (line.StartsWith("[") && line.EndsWith("]"))
                     {
-                        string secName = trimmed.Substring(1, trimmed.Length - 2).Trim();
-                        if (secName.Equals(section, StringComparison.OrdinalIgnoreCase))
+                        currentSec = line.Substring(1, line.Length - 2).Trim();
+                        if (currentSec.Equals(section, StringComparison.OrdinalIgnoreCase))
                         {
-                            sectionIdx = i;
+                            sectionIndex = i;
                         }
+                        continue;
                     }
-                    else if (sectionIdx != -1 && !trimmed.StartsWith("[") && trimmed.Contains("="))
+
+                    if (currentSec.Equals(section, StringComparison.OrdinalIgnoreCase))
                     {
-                        string[] parts = trimmed.Split(new char[] { '=' }, 2);
-                        if (parts[0].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                        int eq = line.IndexOf('=');
+                        if (eq > 0)
                         {
-                            keyIdx = i;
-                            break;
+                            string k = line.Substring(0, eq).Trim();
+                            if (k.Equals(key, StringComparison.OrdinalIgnoreCase))
+                            {
+                                keyIndex = i;
+                                break;
+                            }
                         }
                     }
                 }
 
-                if (keyIdx != -1)
+                if (keyIndex != -1)
                 {
-                    lines[keyIdx] = key + "=" + value;
+                    lines[keyIndex] = key + "=" + value;
                 }
-                else if (sectionIdx != -1)
+                else if (sectionIndex != -1)
                 {
-                    lines.Insert(sectionIdx + 1, key + "=" + value);
+                    lines.Insert(sectionIndex + 1, key + "=" + value);
                 }
                 else
                 {
@@ -110,71 +197,77 @@ namespace SikawanLagustaDisplay
                     lines.Add(key + "=" + value);
                 }
 
-                File.WriteAllLines(iniPath, lines.ToArray());
+                File.WriteAllLines(configPath, lines.ToArray(), Encoding.UTF8);
             }
             catch { }
         }
 
         public static string ScanForServer()
         {
-            try
+            string baseIp = GetValue("Network", "BaseIP", "");
+            if (string.IsNullOrEmpty(baseIp))
             {
-                string localIp = GetLocalIPAddress();
-                if (string.IsNullOrEmpty(localIp)) return null;
-
-                string subnet = localIp.Substring(0, localIp.LastIndexOf('.') + 1);
-
-                for (int i = 1; i < 255; i++)
+                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
                 {
-                    string targetIp = subnet + i;
+                    if (ni.OperationalStatus == OperationalStatus.Up && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                    {
+                        foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+                        {
+                            if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
+                            {
+                                string ipStr = ip.Address.ToString();
+                                int lastDot = ipStr.LastIndexOf('.');
+                                if (lastDot > 0)
+                                {
+                                    baseIp = ipStr.Substring(0, lastDot);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(baseIp)) break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(baseIp)) return null;
+
+            string resultIp = null;
+            object lockObj = new object();
+            List<Thread> threads = new List<Thread>();
+
+            for (int i = 1; i <= 254; i++)
+            {
+                string targetIp = baseIp + "." + i;
+                Thread t = new Thread(() =>
+                {
                     try
                     {
                         using (TcpClient client = new TcpClient())
                         {
-                            IAsyncResult result = client.BeginConnect(targetIp, 3000, null, null);
-                            bool success = result.AsyncWaitHandle.WaitOne(40, false);
+                            var ar = client.BeginConnect(targetIp, 3000, null, null);
+                            bool success = ar.AsyncWaitHandle.WaitOne(400, false);
                             if (success && client.Connected)
                             {
-                                return targetIp;
+                                lock (lockObj)
+                                {
+                                    if (resultIp == null) resultIp = targetIp;
+                                }
                             }
                         }
                     }
                     catch { }
-                }
+                });
+                threads.Add(t);
+                t.Start();
             }
-            catch { }
-            return null;
-        }
 
-        private static string GetLocalIPAddress()
-        {
-            try
-            {
-                foreach (var netInterface in NetworkInterface.GetAllNetworkInterfaces())
-                {
-                    if (netInterface.OperationalStatus == OperationalStatus.Up &&
-                        netInterface.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                    {
-                        var ipProps = netInterface.GetIPProperties();
-                        foreach (var addr in ipProps.UnicastAddresses)
-                        {
-                            if (addr.Address.AddressFamily == AddressFamily.InterNetwork)
-                            {
-                                string ip = addr.Address.ToString();
-                                if (!ip.StartsWith("169.254")) return ip;
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-            return "127.0.0.1";
+            foreach (Thread t in threads) t.Join(500);
+            return resultIp;
         }
     }
 
     // =========================================================================
-    // MP3 PLAYER - Menggunakan Direct WinMM MCI Isolated Session
-    // (Bebas dari konflik WMP Video Player)
+    // MP3 PLAYER - KOMBINASI: Resource Extractor + WinMM MCI Isolated Session
     // =========================================================================
     public static class Mp3Player
     {
@@ -182,34 +275,66 @@ namespace SikawanLagustaDisplay
         private static extern long mciSendString(string command, StringBuilder returnValue, int returnLength, IntPtr winHandle);
 
         private static int aliasId = 0;
+        private static readonly string tempAudioDir = Path.Combine(Path.GetTempPath(), "KioskAudioCache");
 
-        public static void PlayFileBlocking(string filePath)
+        public static void PlayFileBlocking(string fileName)
         {
-            if (!File.Exists(filePath)) return;
+            string targetPath = Path.Combine(tempAudioDir, fileName);
 
+            try
+            {
+                if (!Directory.Exists(tempAudioDir))
+                {
+                    Directory.CreateDirectory(tempAudioDir);
+                }
+
+                // 1. Ekstrak file audio dari Embedded Resource (.exe) jika belum ada
+                if (!File.Exists(targetPath))
+                {
+                    var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                    string resourceName = "audio." + fileName;
+
+                    using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                    {
+                        if (stream != null)
+                        {
+                            using (FileStream fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
+                            {
+                                stream.CopyTo(fs);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 2. Fallback: cari di folder audio/ lokal jika tidak di-embed / ekstrak gagal
+            if (!File.Exists(targetPath))
+            {
+                string localFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "audio", fileName);
+                if (File.Exists(localFolder)) targetPath = localFolder;
+            }
+
+            if (!File.Exists(targetPath)) return;
+
+            // 3. Putar audio menggunakan sesi MCI terisolasi (bebas konflik video WMP)
             string alias = "snd_" + Interlocked.Increment(ref aliasId);
             try
             {
-                // Tutup alias jika ada sisa
                 mciSendString(string.Format("close {0}", alias), null, 0, IntPtr.Zero);
-
-                // Buka file MP3 dengan MPEGVideo Engine khusus
-                string openCmd = string.Format("open \"{0}\" type mpegvideo alias {0}", filePath, alias);
-                long resOpen = mciSendString(string.Format("open \"{0}\" type mpegvideo alias {1}", filePath, alias), null, 0, IntPtr.Zero);
+                string openCmd = string.Format("open \"{0}\" type mpegvideo alias {1}", targetPath, alias);
+                long resOpen = mciSendString(openCmd, null, 0, IntPtr.Zero);
 
                 if (resOpen == 0)
                 {
-                    // Set volume maksimal untuk channel ini (0 - 1000)
                     mciSendString(string.Format("setaudio {0} volume to 1000", alias), null, 0, IntPtr.Zero);
-
-                    // Play dan tunggu hingga selesai secara synchronous (blocking thread pemanggil suara)
                     mciSendString(string.Format("play {0} wait", alias), null, 0, IntPtr.Zero);
                 }
             }
             catch { }
             finally
             {
-                // Selalu bersihkan alias MCI agar RAM & Audio Channel rilis kembali
+                // Selalu bersihkan alias agar tidak memblokir channel audio
                 mciSendString(string.Format("close {0}", alias), null, 0, IntPtr.Zero);
             }
         }
@@ -264,9 +389,21 @@ namespace SikawanLagustaDisplay
         {
             this.Text = "Display Monitor - SIKAWAN LAGUSTA";
             this.FormBorderStyle = FormBorderStyle.None;
-            this.WindowState = FormWindowState.Maximized;
             this.BackColor = Color.FromArgb(19, 24, 38);
             this.DoubleBuffered = true;
+
+            // Logika Deteksi Multi-Monitor (Otomatis pindah ke Monitor 2 jika ada)
+            Screen targetScreen = Screen.PrimaryScreen;
+            if (Screen.AllScreens.Length > 1)
+            {
+                // Pilih layar kedua (indeks 1)
+                targetScreen = Screen.AllScreens[1];
+            }
+
+            // Atur posisi dan ukuran window persis sesuai layar target
+            this.StartPosition = FormStartPosition.Manual;
+            this.Bounds = targetScreen.Bounds;
+            this.WindowState = FormWindowState.Maximized;
 
             string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
             if (File.Exists(icoPath))
@@ -320,6 +457,9 @@ namespace SikawanLagustaDisplay
             Panel headerPanel = new Panel { Dock = DockStyle.Top, Height = 80, BackColor = Color.FromArgb(15, 20, 32) };
             this.Controls.Add(headerPanel);
 
+            // Gunakan batas ukuran sesuai layar aktif tempat form berada
+            Rectangle activeBounds = this.Bounds;
+
             PictureBox picLogo = new PictureBox { Size = new Size(60, 60), Location = new Point(20, 10), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent };
             string logoIcoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
             if (File.Exists(logoIcoPath))
@@ -335,17 +475,17 @@ namespace SikawanLagustaDisplay
                 Text = "SISTEM INFORMASI PENDAFTARAN KUNJUNGAN WARGA BINAAN LAPAS KELAS I MEDAN",
                 Font = new Font("Segoe UI", 13, FontStyle.Bold), ForeColor = Color.White,
                 TextAlign = ContentAlignment.MiddleLeft, Location = new Point(90, 0),
-                Size = new Size(Screen.PrimaryScreen.Bounds.Width - 300, 80)
+                Size = new Size(activeBounds.Width - 300, 80)
             });
 
             lblClock = new Label { Font = new Font("Segoe UI", 16, FontStyle.Bold), ForeColor = Color.White,
                 TextAlign = ContentAlignment.MiddleRight, Size = new Size(200, 30),
-                Location = new Point(Screen.PrimaryScreen.Bounds.Width - 220, 12) };
+                Location = new Point(activeBounds.Width - 220, 12) };
             headerPanel.Controls.Add(lblClock);
 
             lblDate = new Label { Font = new Font("Segoe UI", 10), ForeColor = Color.FromArgb(180, 190, 205),
                 TextAlign = ContentAlignment.MiddleRight, Size = new Size(200, 25),
-                Location = new Point(Screen.PrimaryScreen.Bounds.Width - 220, 42) };
+                Location = new Point(activeBounds.Width - 220, 42) };
             headerPanel.Controls.Add(lblDate);
 
             // FOOTER
@@ -365,8 +505,8 @@ namespace SikawanLagustaDisplay
             this.Controls.Add(mainPanel);
             mainPanel.BringToFront(); headerPanel.BringToFront(); footerPanel.BringToFront();
 
-            int sw = Screen.PrimaryScreen.Bounds.Width;
-            int sh = Screen.PrimaryScreen.Bounds.Height - 115;
+            int sw = activeBounds.Width;
+            int sh = activeBounds.Height - 115;
             int leftW = (int)(sw * 0.60);
             int rightW = sw - leftW - 40;
 
@@ -664,11 +804,11 @@ namespace SikawanLagustaDisplay
 
                 foreach (string file in filesToPlay)
                 {
-                    string fullPath = Path.Combine(audioFolder, file);
-                    Mp3Player.PlayFileBlocking(fullPath);
+                    // Memutar file audio dari embedded resource / temp folder
+                    Mp3Player.PlayFileBlocking(file);
                 }
 
-                Thread.Sleep(500);
+                Thread.Sleep(300);
             }
         }
 
