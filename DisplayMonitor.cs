@@ -364,6 +364,9 @@ Volume=1000";
 
         private Label lblServerStatus;
         private Timer timerClock;
+        private Timer timerRunningText;
+        private Label lblRunningText;
+        private int runningTextX;
 
         private Panel videoPanelHost;
 
@@ -560,7 +563,7 @@ Volume=1000";
                 Location = new Point(activeBounds.Width - 220, 42) };
             headerPanel.Controls.Add(lblDate);
 
-            // FOOTER
+            // FOOTER (Paling Bawah)
             Panel footerPanel = new Panel { Dock = DockStyle.Bottom, Height = 35, BackColor = Color.FromArgb(10, 14, 24) };
             this.Controls.Add(footerPanel);
             footerPanel.Controls.Add(new Label { Text = "© " + DateTime.Now.Year + " - SIKAWAN LAGUSTA",
@@ -572,10 +575,42 @@ Volume=1000";
                 Dock = DockStyle.Right, AutoSize = true };
             footerPanel.Controls.Add(lblServerStatus);
 
-            // MAIN
-            Panel mainPanel = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(235, 240, 248) };
+            // PANEL LINTASAN RUNNING TEXT (Eksplisit di ATAS Footer)
+            Panel runningTextPanel = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = Color.FromArgb(24, 32, 48) };
+            runningTextPanel.Paint += (s, e) =>
+            {
+                // Garis pembatas emas atas & bawah untuk lintasan
+                using (Pen p = new Pen(Color.FromArgb(245, 185, 40), 1.5f))
+                {
+                    e.Graphics.DrawLine(p, 0, 0, runningTextPanel.Width, 0);
+                    e.Graphics.DrawLine(p, 0, runningTextPanel.Height - 1, runningTextPanel.Width, runningTextPanel.Height - 1);
+                }
+            };
+            this.Controls.Add(runningTextPanel);
+
+            lblRunningText = new Label
+            {
+                Text = "SELAMAT DATANG DI LAPAS KELAS I MEDAN  ***  HARAP TETAP TENANG DAN TERTIB SAAT MENUNGGU ANTREAN  ***  PERHATIKAN NOMOR ANTREAN PADA LAYAR DISPLAI  ***  TETAP PATUHI PROTOKOL KESEHATAN DAN TATA TERTIB KUNJUNGAN",
+                Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(245, 185, 40),
+                AutoSize = true,
+                Location = new Point(activeBounds.Width, 9),
+                BackColor = Color.Transparent
+            };
+            runningTextPanel.Controls.Add(lblRunningText);
+
+            // MAIN PANEL (Di tengah antara Header dan RunningTextPanel)
+            Panel mainPanel = new Panel { 
+                Dock = DockStyle.Fill, 
+                BackColor = Color.FromArgb(19, 24, 38)
+            };
             this.Controls.Add(mainPanel);
-            mainPanel.BringToFront(); headerPanel.BringToFront(); footerPanel.BringToFront();
+            
+            // Susun Z-Order eksplisit WinForms agar urutan vertikal sempurna
+            this.Controls.SetChildIndex(mainPanel, 0);
+            this.Controls.SetChildIndex(headerPanel, 1);
+            this.Controls.SetChildIndex(runningTextPanel, 2);
+            this.Controls.SetChildIndex(footerPanel, 3);
 
             // LEFT: VIDEO + INFO
             Panel leftPanel = new Panel { BackColor = Color.Transparent };
@@ -606,37 +641,67 @@ Volume=1000";
             Panel cardPenitipan = CreateQueueCard("PENITIPAN BARANG", Color.FromArgb(136, 108, 179), "B000", "LOKET 2", out lblPenitipanNumber, out lblPenitipanCounter);
             rightPanel.Controls.Add(cardPenitipan);
 
-            // Responsive Layout Manager (Otomatis mengisi 100% tinggi layar tanpa ruang kosong di bawah)
+            // Responsive Layout Manager (Dengan Spasi Margin yang Rapi)
             Action performResponsiveLayout = () =>
             {
                 int mainW = mainPanel.ClientSize.Width;
-                int mainH = mainPanel.ClientSize.Height;
+                int mainH = mainPanel.ClientSize.Height; 
                 if (mainW <= 0 || mainH <= 0) return;
 
-                int gap = 20;
-                int leftW = (int)(mainW * 0.58);
-                int rightW = mainW - leftW - (gap * 3);
+                int marginGap = 15;
+                int topOffset = 15; // Jarak rapat tepat di bawah Header
+                int usableH = mainH - topOffset - marginGap; // Tinggi bersih untuk konten video & kartu
 
-                leftPanel.Location = new Point(gap, gap);
-                leftPanel.Size = new Size(leftW, mainH - (gap * 2));
+                if (usableH <= 0) return;
 
-                rightPanel.Location = new Point(leftW + (gap * 2), gap);
-                rightPanel.Size = new Size(rightW, mainH - (gap * 2));
+                // Perbesar porsi lebar panel kiri (Video) dari 0.58 menjadi 0.65 (lebih lebar ke kanan)
+                int leftW = (int)(mainW * 0.65);
+                int rightW = mainW - leftW - (marginGap * 3);
 
-                int videoH = (int)(leftPanel.Height * 0.70);
+                // Kontainer Kiri (Video & Informasi)
+                leftPanel.Location = new Point(marginGap, topOffset);
+                leftPanel.Size = new Size(leftW, usableH);
+
+                // Perbesar tinggi video dari 0.68 menjadi 0.76 (lebih besar ke bawah)
+                int videoH = (int)(usableH * 0.76);
                 videoPanelHost.Height = videoH;
-                infoBox.Height = leftPanel.Height - videoH - gap;
+                infoBox.Height = usableH - videoH - marginGap;
 
-                int cardH = (rightPanel.Height - gap) / 2;
+                // Kontainer Kanan (Kartu Antrean)
+                rightPanel.Location = new Point(leftW + (marginGap * 2), topOffset);
+                rightPanel.Size = new Size(rightW, usableH);
+
+                int cardH = (usableH - marginGap) / 2;
+
                 cardKunjungan.Location = new Point(0, 0);
                 cardKunjungan.Size = new Size(rightW, cardH);
 
-                cardPenitipan.Location = new Point(0, cardH + gap);
+                cardPenitipan.Location = new Point(0, cardH + marginGap);
                 cardPenitipan.Size = new Size(rightW, cardH);
             };
 
             mainPanel.Resize += (s, e) => performResponsiveLayout();
-            this.Load += (s, e) => performResponsiveLayout();
+            this.Load += (s, e) => 
+            {
+                performResponsiveLayout();
+                StartRunningTextAnimation();
+            };
+        }
+
+        private void StartRunningTextAnimation()
+        {
+            runningTextX = this.ClientSize.Width;
+            timerRunningText = new Timer { Interval = 30 };
+            timerRunningText.Tick += (s, e) =>
+            {
+                runningTextX -= 2;
+                if (lblRunningText.Right < 0)
+                {
+                    runningTextX = this.ClientSize.Width;
+                }
+                lblRunningText.Location = new Point(runningTextX, lblRunningText.Location.Y);
+            };
+            timerRunningText.Start();
         }
 
         private void InitializeVideoPlayer()
@@ -678,6 +743,7 @@ Volume=1000";
         private Panel CreateQueueCard(string title, Color color, string defNum, string defCounter,
             out Label numLabel, out Label counterLabel)
         {
+            // Buat kontainer utama kartu
             Panel card = new Panel { BackColor = Color.White };
             card.Paint += (s, e) =>
             {
@@ -688,30 +754,64 @@ Volume=1000";
                     Color.FromArgb(200, 210, 225), 2, ButtonBorderStyle.Solid);
             };
 
-            // 1. Panel Header Atas (KUNJUNGAN / PENITIPAN BARANG) - Terisolasi penuh tanpa saling tumpuk
-            Panel pnlHeader = new Panel { Dock = DockStyle.Top, Height = 48, BackColor = color };
-            Label lblHeader = new Label { Text = title, Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
+            // 1. Header (Panel Biru Muda / Ungu)
+            Panel pnlHeader = new Panel
+            {
+                Height = 48,
+                BackColor = color,
+                Dock = DockStyle.Top
+            };
+
+            Label lblHeader = new Label
+            {
+                Text = title,
+                Font = new Font("Segoe UI", 16, FontStyle.Bold),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent
+            };
             pnlHeader.Controls.Add(lblHeader);
 
-            // 2. Panel Footer Bawah (LOKET 1 / LOKET 2)
-            Panel pnlCounter = new Panel { Dock = DockStyle.Bottom, Height = 55, BackColor = Color.FromArgb(25, 35, 55) };
-            Label lblCnt = new Label { Text = defCounter, Font = new Font("Segoe UI", 18, FontStyle.Bold),
-                ForeColor = Color.White, TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
+            // 2. Footer (Panel Gelap Loket)
+            Panel pnlCounter = new Panel
+            {
+                Height = 45,
+                BackColor = Color.FromArgb(25, 35, 55),
+                Dock = DockStyle.Bottom
+            };
+
+            Label lblCnt = new Label
+            {
+                Text = defCounter,
+                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill,
+                BackColor = Color.Transparent
+            };
             pnlCounter.Controls.Add(lblCnt);
             counterLabel = lblCnt;
 
-            // 3. Panel Tengah (Nomor Antrean A000 / B000)
-            Panel pnlBody = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-            Label lblNum = new Label { Text = defNum, Font = new Font("Segoe UI", 60, FontStyle.Bold),
-                ForeColor = Color.FromArgb(20, 25, 35), TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill };
-            pnlBody.Controls.Add(lblNum);
+            // 3. Body Teks Angka Antrean (Ditempatkan di antara header & counter)
+            Label lblNum = new Label
+            {
+                Text = defNum,
+                Font = new Font("Segoe UI", 56, FontStyle.Bold),
+                ForeColor = Color.FromArgb(20, 25, 35),
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.White,
+                Dock = DockStyle.Fill
+            };
             numLabel = lblNum;
 
-            // Masukkan panel dengan urutan docking WinForms yang tepat
-            card.Controls.Add(pnlBody);
-            card.Controls.Add(pnlCounter);
+            // Masukkan kontrol dengan urutan eksplisit Docking WinForms (Counter & Header dipasang SEBELUM Fill)
+            card.Controls.Add(lblNum);
             card.Controls.Add(pnlHeader);
+            card.Controls.Add(pnlCounter);
+
+            pnlHeader.BringToFront();
+            pnlCounter.SendToBack();
 
             return card;
         }
@@ -919,6 +1019,7 @@ Volume=1000";
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             try { if (timerMonitorCheck != null) timerMonitorCheck.Stop(); } catch { }
+            try { if (timerRunningText != null) timerRunningText.Stop(); } catch { }
             try { if (tcpClient != null) tcpClient.Close(); } catch { }
             base.OnFormClosing(e);
         }
