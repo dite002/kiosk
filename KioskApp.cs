@@ -22,10 +22,12 @@ namespace SikawanLagustaKiosk
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern bool SetDllDirectory(string lpPathName);
 
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
+
         [STAThread]
         static void Main()
         {
-            // Daftarkan lokasi folder DLL C++ Native (x64 / x86) ke Windows DLL Search Path
             SetupDllDirectories();
 
             Application.EnableVisualStyles();
@@ -41,11 +43,7 @@ namespace SikawanLagustaKiosk
                 string is64 = IntPtr.Size == 8 ? "x64" : "x86";
                 string archDir = Path.Combine(baseDir, is64);
 
-                // Buat folder x64/x86 otomatis jika belum ada dan copy SQLite.Interop.dll dari root
-                if (!Directory.Exists(archDir))
-                {
-                    Directory.CreateDirectory(archDir);
-                }
+                if (!Directory.Exists(archDir)) Directory.CreateDirectory(archDir);
 
                 string sourceInterop = Path.Combine(baseDir, "SQLite.Interop.dll");
                 string targetInterop = Path.Combine(archDir, "SQLite.Interop.dll");
@@ -55,8 +53,12 @@ namespace SikawanLagustaKiosk
                     File.Copy(sourceInterop, targetInterop, true);
                 }
 
-                // Beritahu Windows untuk mencari DLL C++ di folder x64/x86 & root
                 SetDllDirectory(archDir);
+                SetDllDirectory(baseDir);
+
+                // Pre-load SQLite.Interop.dll dengan SetErrorMode agar tidak crash jika VC++ runtime absen
+                if (File.Exists(targetInterop)) LoadLibrary(targetInterop);
+                else if (File.Exists(sourceInterop)) LoadLibrary(sourceInterop);
             }
             catch { }
         }
@@ -216,7 +218,7 @@ namespace SikawanLagustaKiosk
 
         private void ProcessIncomingSocketMessage(string message)
         {
-            // Format perintah dari CallerApp: CALL|ticketId|counterNo
+            // Format perintah dari CallerApp: CALL|ticketId|counterNo atau GET_WAITING|category
             message = message.Trim();
             string[] parts = message.Split('|');
             if (parts.Length >= 3 && parts[0] == "CALL")
@@ -226,6 +228,68 @@ namespace SikawanLagustaKiosk
 
                 ProcessCallTicket(ticketId, counterNo);
             }
+            else if (parts.Length >= 2 && parts[0] == "GET_WAITING")
+            {
+                string category = parts[1].Trim();
+                int count = GetWaitingCountFromDb(category);
+                BroadcastMessage(string.Format("WAITING_COUNT|{0}|{1}", category, count));
+            }
+            else if (parts.Length >= 3 && parts[0] == "GET_NEXT")
+            {
+                string category = parts[1].Trim();
+                int counterNo = Convert.ToInt32(parts[2].Trim());
+                CallNextTicketFromDb(category, counterNo);
+            }
+        }
+
+        private int GetWaitingCountFromDb(string category)
+        {
+            int count = 0;
+            try
+            {
+                using (SQLiteConnection conn = new SQLiteConnection(connectionString))
+                {
+                    conn.Open();
+                    string sql = "SELECT COUNT(*) FROM tickets WHERE category = @cat AND status = 'waiting' AND date(created_at) = date('now', 'localtime')";
+                    using (SQLiteCommand cmd = new SQLiteCommand(sql, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@cat", category);
+                        count = Convert.ToInt32(cmd.ExecuteScalar());
+                    }
+                }
+            }
+            catch { }
+            return count;
+        }
+
+        private void CallNextTicketFromDb(string category, int counterNo)
+        {
+            try
+            {
+                using (SQLiteConnection conn = new SQLiteConnection(connectionString))
+                {
+                    conn.Open();
+                    string sqlGet = @"
+                        SELECT id, prefix, number 
+                        FROM tickets 
+                        WHERE category = @cat AND status = 'waiting' AND date(created_at) = date('now', 'localtime')
+                        ORDER BY number ASC LIMIT 1";
+
+                    using (SQLiteCommand cmd = new SQLiteCommand(sqlGet, conn))
+                    {
+                        cmd.Parameters.AddWithValue("@cat", category);
+                        using (SQLiteDataReader reader = cmd.ExecuteReader())
+                        {
+                            if (reader.Read())
+                            {
+                                string ticketId = reader["id"].ToString();
+                                ProcessCallTicket(ticketId, counterNo);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
         }
 
         private void ProcessCallTicket(string ticketId, int counterNo)
