@@ -373,23 +373,20 @@ namespace SikawanLagustaKiosk
         private void InitializeKioskSettings()
         {
             // =========================================================================
-            // NONAKTIFKAN SEMENTARA MODE KIOSK UNTUK TESTING / UJI COBA
-            // Hapus atau beri komentar kembali pada kode di bawah jika siap dipakai
+            // MODE KIOSK PRODUKSI AKTIF
             // =========================================================================
-
-            /* --- AKTIFKAN KEMBALI KODE INI UNTUK MODE KIOSK PRODUKSI ---
             this.FormBorderStyle = FormBorderStyle.None;
             this.WindowState = FormWindowState.Maximized;
             this.TopMost = true;
             ToggleTaskbar(false);
-            ------------------------------------------------------------*/
 
-            // MODE TESTING (WINDOWED biasa agar mudah di-debug)
+            /* --- MODE TESTING DITUTUP ---
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.WindowState = FormWindowState.Normal;
             this.Size = new Size(1280, 720);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.TopMost = false;
+            --------------------------------*/
 
             this.DoubleBuffered = true;
 
@@ -910,21 +907,18 @@ namespace SikawanLagustaKiosk
             
             if (dr == DialogResult.Yes)
             {
-                // ToggleTaskbar(true); // Komentar sementara
+                ToggleTaskbar(true); // Tampilkan kembali taskbar saat keluar
                 Application.Exit();
             }
         }
 
         private static void ToggleTaskbar(bool show)
         {
-            // Komentar sementara agar Taskbar Windows tetap aman saat pengujian
-            /*
             int hwnd = FindWindow("Shell_TrayWnd", null);
             if (hwnd != 0)
             {
                 ShowWindow(hwnd, show ? SW_SHOW : SW_HIDE);
             }
-            */
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
